@@ -40,6 +40,19 @@ const (
 	middlewareStackKey middlewareStackType = iota
 )
 
+var middlewares = map[string]Middleware{}
+
+type Middleware interface {
+
+	// New middleware instance
+	New(ctx context.Context, next http.Handler, name string) (http.Handler, error)
+}
+
+// Provide the middleware
+func Provide(name string, middleware Middleware) {
+	middlewares[name] = middleware
+}
+
 // Builder the middleware builder.
 type Builder struct {
 	configs        map[string]*runtime.MiddlewareInfo
@@ -344,6 +357,12 @@ func (b *Builder) buildConstructor(ctx context.Context, middlewareName string) (
 		}
 		middleware = func(next http.Handler) (http.Handler, error) {
 			return stripprefixregex.New(ctx, next, *config.StripPrefixRegex, middlewareName)
+		}
+	}
+
+	if nil != middlewares[middlewareName] {
+		middleware = func(next http.Handler) (http.Handler, error) {
+			return middlewares[middlewareName].New(ctx, next, middlewareName)
 		}
 	}
 
