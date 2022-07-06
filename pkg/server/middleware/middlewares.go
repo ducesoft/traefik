@@ -44,6 +44,9 @@ var middlewares = map[string]Middleware{}
 
 type Middleware interface {
 
+	// Scope is middleware effect scope, 0 is global, others is customized.
+	Scope() int
+
 	// New middleware instance
 	New(ctx context.Context, next http.Handler, name string) (http.Handler, error)
 }
@@ -401,4 +404,19 @@ func inSlice(element string, stack []string) bool {
 		}
 	}
 	return false
+}
+
+func BuildGlobalMiddleware(ctx context.Context) alice.Constructor {
+	constructor := func(next http.Handler) (http.Handler, error) {
+		var err error
+		for name, middleware := range middlewares {
+			if middleware.Scope() == 0 {
+				if next, err = middleware.New(ctx, next, name); nil != err {
+					return nil, err
+				}
+			}
+		}
+		return next, nil
+	}
+	return constructor
 }
