@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/containous/alice"
@@ -44,6 +45,12 @@ var middlewares = map[string]Middleware{}
 
 type Middleware interface {
 
+	// Name is middleware name
+	Name() string
+
+	// Priority more than has more priority
+	Priority() int
+
 	// Scope is middleware effect scope, 0 is global, others is customized.
 	Scope() int
 
@@ -52,8 +59,8 @@ type Middleware interface {
 }
 
 // Provide the middleware
-func Provide(name string, middleware Middleware) {
-	middlewares[name] = middleware
+func Provide(middleware Middleware) {
+	middlewares[middleware.Name()] = middleware
 }
 
 // Builder the middleware builder.
@@ -407,13 +414,18 @@ func inSlice(element string, stack []string) bool {
 }
 
 func BuildGlobalMiddleware(ctx context.Context) alice.Constructor {
+	var plugins []Middleware
+	for _, middleware := range middlewares {
+		if middleware.Scope() == 0 {
+			plugins = append(plugins, middleware)
+		}
+	}
+	sort.Slice(plugins, func(i, j int) bool { return plugins[i].Priority() < plugins[j].Priority() })
 	constructor := func(next http.Handler) (http.Handler, error) {
 		var err error
-		for name, middleware := range middlewares {
-			if middleware.Scope() == 0 {
-				if next, err = middleware.New(ctx, next, name); nil != err {
-					return nil, err
-				}
+		for _, plugin := range plugins {
+			if next, err = plugin.New(ctx, next, plugin.Name()); nil != err {
+				return nil, err
 			}
 		}
 		return next, nil
