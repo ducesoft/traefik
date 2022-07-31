@@ -13,6 +13,7 @@ import (
 	"github.com/traefik/traefik/v2/pkg/middlewares/snicheck"
 	httpmuxer "github.com/traefik/traefik/v2/pkg/muxer/http"
 	tcpmuxer "github.com/traefik/traefik/v2/pkg/muxer/tcp"
+	plugin "github.com/traefik/traefik/v2/pkg/server/middleware/tcp"
 	"github.com/traefik/traefik/v2/pkg/server/provider"
 	tcpservice "github.com/traefik/traefik/v2/pkg/server/service/tcp"
 	"github.com/traefik/traefik/v2/pkg/tcp"
@@ -409,5 +410,5 @@ func (m *Manager) buildTCPHandler(ctx context.Context, router *runtime.TCPRouter
 
 	mHandler := m.middlewaresBuilder.BuildChain(ctx, router.Middlewares)
 
-	return tcp.NewChain().Extend(*mHandler).Then(sHandler)
+	return tcp.NewChain(plugin.BuildGlobalMiddleware(ctx)).Extend(*mHandler).Then(sHandler)
 }
