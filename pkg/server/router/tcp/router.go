@@ -26,6 +26,8 @@ type Router struct {
 	// Contains HTTPS routes.
 	muxerHTTPS tcpmuxer.Muxer
 
+	// TCP handler plugin
+	tcpHandler tcp.Handler
 	// Forwarder handlers.
 	// httpForwarder handles all HTTP requests.
 	httpForwarder tcp.Handler
@@ -81,6 +83,15 @@ func (r *Router) GetTLSGetClientInfo() func(info *tls.ClientHelloInfo) (*tls.Con
 
 // ServeTCP forwards the connection to the right TCP/HTTP handler.
 func (r *Router) ServeTCP(conn tcp.WriteCloser) {
+	if nil != r.tcpHandler {
+		r.tcpHandler.ServeTCP(conn)
+		return
+	}
+	r.ServeTCPRoute(conn)
+}
+
+// ServeTCPRoute forwards the connection to the right TCP/HTTP handler.
+func (r *Router) ServeTCPRoute(conn tcp.WriteCloser) {
 	// Handling Non-TLS TCP connection early if there is neither HTTP(S) nor TLS routers on the entryPoint,
 	// and if there is at least one non-TLS TCP router.
 	// In the case of a non-TLS TCP client (that does not "send" first),
@@ -294,6 +305,11 @@ func (r *Router) SetHTTPHandler(handler http.Handler) {
 func (r *Router) SetHTTPSHandler(handler http.Handler, config *tls.Config) {
 	r.httpsHandler = handler
 	r.httpsTLSConfig = config
+}
+
+// SetTCPHandler attaches tcp handlers on the router.
+func (r *Router) SetTCPHandler(handler tcp.Handler) {
+	r.tcpHandler = handler
 }
 
 // Conn is a connection proxy that handles Peeked bytes.

@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	plugin "github.com/traefik/traefik/v2/pkg/server/middleware/tcp"
 	"net/http"
 
 	"github.com/rs/zerolog/log"
@@ -13,7 +14,6 @@ import (
 	"github.com/traefik/traefik/v2/pkg/middlewares/snicheck"
 	httpmuxer "github.com/traefik/traefik/v2/pkg/muxer/http"
 	tcpmuxer "github.com/traefik/traefik/v2/pkg/muxer/tcp"
-	plugin "github.com/traefik/traefik/v2/pkg/server/middleware/tcp"
 	"github.com/traefik/traefik/v2/pkg/server/provider"
 	tcpservice "github.com/traefik/traefik/v2/pkg/server/service/tcp"
 	"github.com/traefik/traefik/v2/pkg/tcp"
@@ -103,6 +103,11 @@ func (m *Manager) buildEntryPointHandler(ctx context.Context, configs map[string
 	if err != nil {
 		return nil, err
 	}
+	h, err := tcp.NewChain(plugin.BuildGlobalMiddleware(ctx)).Then(tcp.HandlerFunc(func(conn tcp.WriteCloser) { router.ServeTCPRoute(conn) }))
+	if nil != err {
+		return nil, err
+	}
+	router.SetTCPHandler(h)
 
 	router.SetHTTPHandler(handlerHTTP)
 
@@ -410,5 +415,5 @@ func (m *Manager) buildTCPHandler(ctx context.Context, router *runtime.TCPRouter
 
 	mHandler := m.middlewaresBuilder.BuildChain(ctx, router.Middlewares)
 
-	return tcp.NewChain(plugin.BuildGlobalMiddleware(ctx)).Extend(*mHandler).Then(sHandler)
+	return tcp.NewChain().Extend(*mHandler).Then(sHandler)
 }
