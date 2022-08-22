@@ -215,7 +215,7 @@ func (b *Builder) buildConstructor(ctx context.Context, middlewareName string) (
 			return nil, badConf
 		}
 		middleware = func(next http.Handler) (http.Handler, error) {
-			return customerrors.New(ctx, next, *config.Errors, b.serviceBuilder, middlewareName)
+			return customerrors.New(ctx, next, *config.Errors, b.serviceBuilder, middlewareName, false)
 		}
 	}
 
