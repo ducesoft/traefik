@@ -13,7 +13,7 @@ import (
 	"net/url"
 )
 
-var httpProxies map[string]Proxies
+var httpProxies = map[string]Proxies{}
 
 func ProvideProxy(proxies Proxies) {
 	httpProxies[proxies.Name()] = proxies
