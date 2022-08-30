@@ -8,27 +8,49 @@
 package service
 
 import (
+	"github.com/traefik/traefik/v2/pkg/log"
 	"net/http"
 	"net/url"
 )
 
-var httpProxies map[string]HTTPProxy
+var httpProxies map[string]Proxies
 
-func ProvideHTTPProxy(proxy HTTPProxy) {
-	httpProxies[proxy.Name()] = proxy
+func ProvideProxy(proxies Proxies) {
+	httpProxies[proxies.Name()] = proxies
 }
 
-func LoadHTTPProxy(name string) func(req *http.Request) (*url.URL, error) {
-	if proxy, ok := httpProxies[name]; ok && nil != proxy {
-		return proxy.Proxy
+func CreateProxy(endpoint string) func(req *http.Request) (*url.URL, error) {
+	if "" == endpoint {
+		return http.ProxyFromEnvironment
+	}
+	uri, err := url.Parse(endpoint)
+	if nil != err {
+		log.WithoutContext().Error("Error while create transport proxy", err)
+		return http.ProxyFromEnvironment
+	}
+	name := uri.Query().Get("n")
+	if "" == name {
+		return http.ProxyURL(uri)
+	}
+	if proxies, ok := httpProxies[name]; ok && nil != proxies {
+		query := uri.Query()
+		query.Del("n")
+		uri.RawQuery = query.Encode()
+		return proxies.New(uri.String()).Proxy
 	}
 	return http.ProxyFromEnvironment
 }
 
-type HTTPProxy interface {
+type Proxies interface {
 
 	// Name is the provider name
 	Name() string
+
+	// New a proxy
+	New(endpoint string) Proxy
+}
+
+type Proxy interface {
 
 	// Proxy is the provider implements
 	Proxy(req *http.Request) (*url.URL, error)
