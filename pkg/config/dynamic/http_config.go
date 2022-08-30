@@ -283,6 +283,7 @@ type Spiffe struct {
 	IDs []string `description:"Defines the allowed SPIFFE IDs (takes precedence over the SPIFFE TrustDomain)." json:"ids,omitempty" toml:"ids,omitempty" yaml:"ids,omitempty"`
 	// TrustDomain defines the allowed SPIFFE trust domain.
 	TrustDomain string `description:"Defines the allowed SPIFFE trust domain." json:"trustDomain,omitempty" yaml:"trustDomain,omitempty" toml:"trustDomain,omitempty"`
+	Proxy       string `description:"Network proxy provider." json:"proxy,omitempty" toml:"proxy,omitempty" yaml:"proxy,omitempty" export:"true"`
 }
 
 // +k8s:deepcopy-gen=true
