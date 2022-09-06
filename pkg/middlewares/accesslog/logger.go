@@ -85,6 +85,11 @@ func NewHandler(config *types.AccessLog) (*Handler, error) {
 		}
 		file = f
 	}
+	return NewHandlerWithWriter(config, file)
+}
+
+// NewHandlerWithWriter creates a new Handler.
+func NewHandlerWithWriter(config *types.AccessLog, writer io.WriteCloser) (*Handler, error) {
 	logHandlerChan := make(chan handlerParams, config.BufferingSize)
 
 	var formatter logrus.Formatter
@@ -100,7 +105,7 @@ func NewHandler(config *types.AccessLog) (*Handler, error) {
 	}
 
 	logger := &logrus.Logger{
-		Out:       file,
+		Out:       writer,
 		Formatter: formatter,
 		Hooks:     make(logrus.LevelHooks),
 		Level:     logrus.InfoLevel,
@@ -120,7 +125,7 @@ func NewHandler(config *types.AccessLog) (*Handler, error) {
 	logHandler := &Handler{
 		config:         config,
 		logger:         logger,
-		file:           file,
+		file:           writer,
 		logHandlerChan: logHandlerChan,
 	}
 
