@@ -159,9 +159,9 @@ func (r *Router) ServeTCPRoute(conn tcp.WriteCloser) {
 		handler, _ := r.muxerTCP.Match(connData)
 		switch {
 		case handler != nil:
-			handler.ServeTCP(r.GetConn(conn, hello.peeked))
+			handler.ServeTCP(Accept(hello, r.GetConn(conn, hello.peeked)))
 		case r.httpForwarder != nil:
-			r.httpForwarder.ServeTCP(r.GetConn(conn, hello.peeked))
+			r.httpForwarder.ServeTCP(Accept(hello, r.GetConn(conn, hello.peeked)))
 		default:
 			conn.Close()
 		}
@@ -178,14 +178,14 @@ func (r *Router) ServeTCPRoute(conn tcp.WriteCloser) {
 		// In order not to depart from the behavior in 2.6,
 		// we only allow an HTTPS router to take precedence over a TCP-TLS router if it is _not_ an HostSNI(*) router
 		// (so basically any router that has a specific HostSNI based rule).
-		handlerHTTPS.ServeTCP(r.GetConn(conn, hello.peeked))
+		handlerHTTPS.ServeTCP(Accept(hello, r.GetConn(conn, hello.peeked)))
 		return
 	}
 
 	// Contains also TCP TLS passthrough routes.
 	handlerTCPTLS, catchAllTCPTLS := r.muxerTCPTLS.Match(connData)
 	if handlerTCPTLS != nil && !catchAllTCPTLS {
-		handlerTCPTLS.ServeTCP(r.GetConn(conn, hello.peeked))
+		handlerTCPTLS.ServeTCP(Accept(hello, r.GetConn(conn, hello.peeked)))
 		return
 	}
 
@@ -193,19 +193,19 @@ func (r *Router) ServeTCPRoute(conn tcp.WriteCloser) {
 	// We end up here for e.g. an HTTPS router that only has a PathPrefix rule,
 	// which under the scenes is counted as an HostSNI(*) rule.
 	if handlerHTTPS != nil {
-		handlerHTTPS.ServeTCP(r.GetConn(conn, hello.peeked))
+		handlerHTTPS.ServeTCP(Accept(hello, r.GetConn(conn, hello.peeked)))
 		return
 	}
 
 	// Fallback on TCP TLS catchAll.
 	if handlerTCPTLS != nil {
-		handlerTCPTLS.ServeTCP(r.GetConn(conn, hello.peeked))
+		handlerTCPTLS.ServeTCP(Accept(hello, r.GetConn(conn, hello.peeked)))
 		return
 	}
 
 	// To handle 404s for HTTPS.
 	if r.httpsForwarder != nil {
-		r.httpsForwarder.ServeTCP(r.GetConn(conn, hello.peeked))
+		r.httpsForwarder.ServeTCP(Accept(hello, r.GetConn(conn, hello.peeked)))
 		return
 	}
 
