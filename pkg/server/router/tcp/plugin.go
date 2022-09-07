@@ -9,7 +9,6 @@ package tcp
 
 import (
 	"github.com/traefik/traefik/v2/pkg/tcp"
-	"io"
 )
 
 const DefaultName = "default"
@@ -69,5 +68,5 @@ type Listener interface {
 	Name() string
 
 	// Accept a tcp connection
-	Accept(hello Hello, conn io.WriteCloser) tcp.WriteCloser
+	Accept(hello Hello, conn tcp.WriteCloser) tcp.WriteCloser
 }
