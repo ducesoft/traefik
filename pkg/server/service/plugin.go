@@ -8,15 +8,40 @@
 package service
 
 import (
+	"context"
 	"github.com/traefik/traefik/v2/pkg/log"
+	"golang.org/x/net/proxy"
+	"net"
 	"net/http"
 	"net/url"
 )
 
-var httpProxies = map[string]Proxies{}
+const DefaultName = "default"
+
+var (
+	httpProxies = map[string]Proxies{}
+	netsDialer  = map[string]ContextDialer{}
+)
+
+func ProvideDialer(dialer ContextDialer) {
+	netsDialer[dialer.Name()] = dialer
+}
 
 func ProvideProxy(proxies Proxies) {
 	httpProxies[proxies.Name()] = proxies
+}
+
+func CreateDialer(serverName string, dialer *net.Dialer) func(ctx context.Context, network string, address string) (net.Conn, error) {
+	if "" == serverName {
+		return dialer.DialContext
+	}
+	if netDialer, ok := netsDialer[serverName]; ok && nil != netDialer {
+		return netDialer.New(serverName, dialer).DialContext
+	}
+	if netDialer, ok := netsDialer[DefaultName]; ok && nil != netDialer {
+		return netDialer.New(serverName, dialer).DialContext
+	}
+	return dialer.DialContext
 }
 
 func CreateProxy(endpoint string) func(req *http.Request) (*url.URL, error) {
@@ -54,4 +79,13 @@ type Proxy interface {
 
 	// Proxy is the provider implements
 	Proxy(req *http.Request) (*url.URL, error)
+}
+
+type ContextDialer interface {
+
+	// Name is the provider name
+	Name() string
+
+	// New a dialer
+	New(serverName string, dialer *net.Dialer) proxy.ContextDialer
 }
