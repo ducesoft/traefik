@@ -281,3 +281,8 @@ func (r *codeModifier) Flush() {
 		flusher.Flush()
 	}
 }
+
+// Code return the real response code.
+func (r *codeModifierWithoutCloseNotify) Code() int {
+	return r.code
+}
