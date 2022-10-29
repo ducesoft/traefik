@@ -273,6 +273,7 @@ type ServersTransport struct {
 	DisableHTTP2        bool                       `description:"Disable HTTP/2 for connections with backend servers." json:"disableHTTP2,omitempty" toml:"disableHTTP2,omitempty" yaml:"disableHTTP2,omitempty" export:"true"`
 	PeerCertURI         string                     `description:"URI used to match against SAN URI during the peer certificate verification." json:"peerCertURI,omitempty" toml:"peerCertURI,omitempty" yaml:"peerCertURI,omitempty" export:"true"`
 	Spiffe              *Spiffe                    `description:"Define the SPIFFE configuration." json:"spiffe,omitempty" toml:"spiffe,omitempty" yaml:"spiffe,omitempty" label:"allowEmpty" file:"allowEmpty" export:"true"`
+	Proxy               string                     `description:"Network proxy provider." json:"proxy,omitempty" toml:"proxy,omitempty" yaml:"proxy,omitempty" export:"true"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -283,7 +284,6 @@ type Spiffe struct {
 	IDs []string `description:"Defines the allowed SPIFFE IDs (takes precedence over the SPIFFE TrustDomain)." json:"ids,omitempty" toml:"ids,omitempty" yaml:"ids,omitempty"`
 	// TrustDomain defines the allowed SPIFFE trust domain.
 	TrustDomain string `description:"Defines the allowed SPIFFE trust domain." json:"trustDomain,omitempty" yaml:"trustDomain,omitempty" toml:"trustDomain,omitempty"`
-	Proxy       string `description:"Network proxy provider." json:"proxy,omitempty" toml:"proxy,omitempty" yaml:"proxy,omitempty" export:"true"`
 }
 
 // +k8s:deepcopy-gen=true

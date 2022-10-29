@@ -9,7 +9,7 @@ package service
 
 import (
 	"context"
-	"github.com/traefik/traefik/v2/pkg/log"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/net/proxy"
 	"net"
 	"net/http"
@@ -50,7 +50,7 @@ func CreateProxy(endpoint string) func(req *http.Request) (*url.URL, error) {
 	}
 	uri, err := url.Parse(endpoint)
 	if nil != err {
-		log.WithoutContext().Error("Error while create transport proxy", err)
+		log.Error().Msgf("Error while create transport proxy, %v", err)
 		return http.ProxyFromEnvironment
 	}
 	name := uri.Query().Get("n")
