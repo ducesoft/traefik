@@ -28,5 +28,4 @@ yarn-error.log*
 .env.*.local
 
 # static assets (ignore all except the DO NOT EDIT file)
-static/*
 !static/DONT-EDIT-FILES-IN-THIS-DIRECTORY.md
