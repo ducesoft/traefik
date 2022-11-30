@@ -282,7 +282,3 @@ func (r *codeModifier) Flush() {
 	}
 }
 
-// Code return the real response code.
-func (r *codeModifierWithoutCloseNotify) Code() int {
-	return r.code
-}

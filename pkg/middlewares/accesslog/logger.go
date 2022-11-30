@@ -90,8 +90,6 @@ func NewHandler(config *types.AccessLog) (*Handler, error) {
 
 // NewHandlerWithWriter creates a new Handler.
 func NewHandlerWithWriter(config *types.AccessLog, writer io.WriteCloser) (*Handler, error) {
-	logHandlerChan := make(chan handlerParams, config.BufferingSize)
-
 	var formatter logrus.Formatter
 
 	switch config.Format {
@@ -103,6 +101,12 @@ func NewHandlerWithWriter(config *types.AccessLog, writer io.WriteCloser) (*Hand
 		log.Error().Msgf("Unsupported access log format: %q, defaulting to common format instead.", config.Format)
 		formatter = new(CommonLogFormatter)
 	}
+	return NewHandlerWithFormatWriter(config, writer, formatter)
+}
+
+// NewHandlerWithFormatWriter creates a new Handler.
+func NewHandlerWithFormatWriter(config *types.AccessLog, writer io.WriteCloser, formatter logrus.Formatter) (*Handler, error) {
+	logHandlerChan := make(chan handlerParams, config.BufferingSize)
 
 	logger := &logrus.Logger{
 		Out:       writer,
