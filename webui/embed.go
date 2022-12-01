@@ -10,3 +10,13 @@ var assets embed.FS
 
 // FS contains the web UI assets.
 var FS, _ = fs.Sub(assets, "static")
+
+type FileSystem interface {
+	fs.FS
+	fs.ReadDirFS
+	fs.ReadFileFS
+}
+
+func WFS() FileSystem {
+	return assets
+}
