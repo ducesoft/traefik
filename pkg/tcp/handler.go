@@ -37,6 +37,13 @@ type Conn interface {
 	CloseWrite() error
 }
 
+func StatefulContextConn(ctx context.Context, conn Conn) WriteCloser {
+	return &StatefulWriteCloser{
+		Conn: conn,
+		ctx:  ctx,
+	}
+}
+
 func StatefulConn(conn Conn) WriteCloser {
 	if x, ok := conn.(WriteCloser); ok {
 		return x

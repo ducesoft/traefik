@@ -12,5 +12,5 @@ type TLSHandler struct {
 
 // ServeTCP terminates the TLS connection.
 func (t *TLSHandler) ServeTCP(conn WriteCloser) {
-	t.Next.ServeTCP(StatefulConn(tls.Server(conn, t.Config)))
+	t.Next.ServeTCP(StatefulContextConn(conn.Context(), tls.Server(conn, t.Config)))
 }
