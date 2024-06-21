@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/traefik/traefik/v3/pkg/middlewares/accesslog"
 	"math/rand"
 	"net"
 	"time"
@@ -78,7 +79,15 @@ func (m *Manager) BuildTCP(rootCtx context.Context, serviceName string) (tcp.Han
 				continue
 			}
 
-			loadBalancer.AddServer(handler)
+			protocol := ""
+			if server.TLS {
+				protocol = "s"
+			}
+			loadBalancer.AddServer(tcp.NewFieldHandler(handler, map[string]any{
+				accesslog.ServiceURL:  fmt.Sprintf("tcp%s://%s", protocol, server.Address),
+				accesslog.ServiceAddr: server.Address,
+				accesslog.ServiceName: serviceName,
+			}))
 			logger.Debug().Msg("Creating TCP server")
 		}
 

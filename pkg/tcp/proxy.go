@@ -48,6 +48,7 @@ func (p *Proxy) ServeTCP(conn WriteCloser) {
 		log.Error().Err(err).Msg("Error while dialing backend")
 		return
 	}
+	SetContextState(conn.Context(), "RequestClientAddr", connBackend.LocalAddr().String())
 
 	// maybe not needed, but just in case
 	defer connBackend.Close()

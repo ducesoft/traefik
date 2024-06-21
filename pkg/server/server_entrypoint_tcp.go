@@ -374,7 +374,7 @@ func (e *TCPEntryPoint) SwitchRouter(rt *tcprouter.Router) {
 // connection type that was found to satisfy WriteCloser.
 type writeCloserWrapper struct {
 	net.Conn
-	writeCloser tcp.WriteCloser
+	writeCloser tcp.Conn
 }
 
 func (c *writeCloserWrapper) CloseWrite() error {
@@ -390,9 +390,9 @@ func writeCloser(conn net.Conn) (tcp.WriteCloser, error) {
 		if !ok {
 			return nil, fmt.Errorf("underlying connection is not a tcp connection")
 		}
-		return &writeCloserWrapper{writeCloser: underlying, Conn: typedConn}, nil
+		return tcp.StatefulConn(&writeCloserWrapper{writeCloser: underlying, Conn: typedConn}), nil
 	case *net.TCPConn:
-		return typedConn, nil
+		return tcp.StatefulConn(typedConn), nil
 	default:
 		return nil, fmt.Errorf("unknown connection type %T", typedConn)
 	}

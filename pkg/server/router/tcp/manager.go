@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"github.com/traefik/traefik/v3/pkg/middlewares/accesslog"
 	plugin "github.com/traefik/traefik/v3/pkg/server/middleware/tcp"
 	"net/http"
 
@@ -312,6 +313,7 @@ func (m *Manager) addTCPHandlers(ctx context.Context, configs map[string]*runtim
 				logger.Error().Err(err).Send()
 				continue
 			}
+			handler = tcp.NewFieldHandler(handler, map[string]any{accesslog.RouterName: routerName})
 		}
 
 		if routerConfig.TLS == nil {
