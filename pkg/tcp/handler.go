@@ -77,6 +77,10 @@ func SetContextState(ctx context.Context, key string, value any) {
 	contextProvider.Set(ctx, key, value)
 }
 
+func GetContextState(ctx context.Context, key string) any {
+	return contextProvider.Get(ctx, key)
+}
+
 var contextProvider ContextProvider = new(dftContextProvider)
 
 type ContextProvider interface {
