@@ -86,7 +86,7 @@ func (p Proxy) dialBackend() (WriteCloser, error) {
 		return nil, err
 	}
 
-	return StatefulConn(conn.(WriteCloser)), nil
+	return StatefulConn(conn.(Conn)), nil
 }
 
 func (p Proxy) connCopy(dst, src WriteCloser, errCh chan error) {
