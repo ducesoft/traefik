@@ -38,6 +38,9 @@ type Conn interface {
 }
 
 func StatefulConn(conn Conn) WriteCloser {
+	if x, ok := conn.(WriteCloser); ok {
+		return x
+	}
 	return &StatefulWriteCloser{
 		Conn: conn,
 		ctx:  contextProvider.New(),
