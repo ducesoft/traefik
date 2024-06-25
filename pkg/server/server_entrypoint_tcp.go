@@ -80,6 +80,9 @@ func (h *httpForwarder) ServeTCP(conn tcp.WriteCloser) {
 func (h *httpForwarder) Accept() (net.Conn, error) {
 	select {
 	case conn := <-h.connChan:
+		if sc, ok := conn.(*tcp.StatefulWriteCloser); ok {
+			return sc.Conn, nil
+		}
 		return conn, nil
 	case err := <-h.errChan:
 		return nil, err
