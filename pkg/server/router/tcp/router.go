@@ -118,34 +118,40 @@ func (r *Router) ServeTCPRoute(conn tcp.WriteCloser) {
 		// we still need to reply with a 404.
 	}
 
+	// Set a deadline for reading
+	err := conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+	if nil != err {
+		log.Error().Err(err).Msg("Error setting deadline")
+	}
 	// TODO -- Check if ProxyProtocol changes the first bytes of the request
 	br := bufio.NewReader(conn)
 	postgres, err := isPostgres(br)
-	if err != nil {
+	if err != nil && !IsTimeout(err) {
 		conn.Close()
 		return
 	}
 
 	if postgres {
+		// Remove read/write deadline and delegate this to underlying TCP server.
+		if err = conn.SetDeadline(time.Time{}); err != nil {
+			log.Error().Err(err).Msg("Error while setting deadline")
+		}
 		r.servePostgres(r.GetConn(conn, getPeeked(br)))
 		return
 	}
 
 	hello, err := clientHelloInfo(br)
-	if err != nil {
+	if err != nil && !IsTimeout(err) {
 		conn.Close()
 		return
 	}
-
-	// Remove read/write deadline and delegate this to underlying tcp server (for now only handled by HTTP Server)
-	err = conn.SetReadDeadline(time.Time{})
-	if err != nil {
-		log.Error().Err(err).Msg("Error while setting read deadline")
+	if IsTimeout(err) {
+		hello = &clientHello{}
 	}
 
-	err = conn.SetWriteDeadline(time.Time{})
-	if err != nil {
-		log.Error().Err(err).Msg("Error while setting write deadline")
+	// Remove read/write deadline and delegate this to underlying TCP server (for now only handled by HTTP Server)
+	if err = conn.SetDeadline(time.Time{}); err != nil {
+		log.Error().Err(err).Msg("Error while setting deadline")
 	}
 
 	connData, err := tcpmuxer.NewConnData(hello.serverName, conn, hello.protos)
@@ -438,3 +444,17 @@ func (c helloSniffConn) Read(p []byte) (int, error) { return c.r.Read(p) }
 
 // Write crashes all the time.
 func (helloSniffConn) Write(p []byte) (int, error) { return 0, io.EOF }
+
+func IsTimeout(err error) bool {
+	if nil == err {
+		return false
+	}
+	switch x := err.(type) {
+	case nil:
+		return false
+	case *net.OpError:
+		return x.Timeout()
+	default:
+		return false
+	}
+}
