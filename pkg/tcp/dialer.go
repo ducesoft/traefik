@@ -151,8 +151,8 @@ func (d *DialerManager) createDialers(name string, cfg *dynamic.TCPServersTransp
 		Config:    tlsConfig,
 	}
 
-	d.dialers[name] = tcpDialer{CreateDialer(cfg.TLS, dialer), time.Duration(cfg.TerminationDelay)}
-	d.dialersTLS[name] = tcpDialer{CreateDialer(cfg.TLS, tlsDialer), time.Duration(cfg.TerminationDelay)}
+	d.dialers[name] = tcpDialer{CreateDialer(cfg, dialer), time.Duration(cfg.TerminationDelay)}
+	d.dialersTLS[name] = tcpDialer{CreateDialer(cfg, tlsDialer), time.Duration(cfg.TerminationDelay)}
 
 	return nil
 }
