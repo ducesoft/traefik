@@ -5,6 +5,8 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"github.com/traefik/traefik/v3/pkg/middlewares/accesslog"
+	plugin "github.com/traefik/traefik/v3/pkg/server/middleware/tcp"
 	"math"
 	"net/http"
 	"strings"
@@ -104,6 +106,11 @@ func (m *Manager) buildEntryPointHandler(ctx context.Context, configs map[string
 	if err != nil {
 		return nil, err
 	}
+	h, err := tcp.NewChain(plugin.BuildGlobalMiddleware(ctx)).Then(tcp.HandlerFunc(func(conn tcp.WriteCloser) { router.ServeTCPRoute(conn) }))
+	if nil != err {
+		return nil, err
+	}
+	router.SetTCPHandler(h)
 
 	router.SetHTTPHandler(handlerHTTP)
 
@@ -316,6 +323,7 @@ func (m *Manager) addTCPHandlers(ctx context.Context, configs map[string]*runtim
 				logger.Error().Err(err).Send()
 				continue
 			}
+			handler = tcp.NewFieldHandler(handler, map[string]any{accesslog.RouterName: routerName})
 		}
 
 		if routerConfig.TLS == nil {

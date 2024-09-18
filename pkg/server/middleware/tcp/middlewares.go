@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/rs/zerolog/log"
@@ -20,6 +21,28 @@ type middlewareStackType int
 const (
 	middlewareStackKey middlewareStackType = iota
 )
+
+var middlewares = map[string]Middleware{}
+
+type Middleware interface {
+
+	// Name is middleware name
+	Name() string
+
+	// Priority more than has more priority
+	Priority() int
+
+	// Scope is middleware effect scope, 0 is global, others is customized.
+	Scope() int
+
+	// New middleware instance
+	New(ctx context.Context, next tcp.Handler, name string) (tcp.Handler, error)
+}
+
+// Provide the middleware
+func Provide(middleware Middleware) {
+	middlewares[middleware.Name()] = middleware
+}
 
 // Builder the middleware builder.
 type Builder struct {
@@ -118,4 +141,24 @@ func (b *Builder) buildConstructor(ctx context.Context, middlewareName string) (
 	}
 
 	return middleware, nil
+}
+
+func BuildGlobalMiddleware(ctx context.Context) tcp.Constructor {
+	var plugins []Middleware
+	for _, middleware := range middlewares {
+		if middleware.Scope() == 0 {
+			plugins = append(plugins, middleware)
+		}
+	}
+	sort.Slice(plugins, func(i, j int) bool { return plugins[i].Priority() < plugins[j].Priority() })
+	constructor := func(next tcp.Handler) (tcp.Handler, error) {
+		var err error
+		for _, plugin := range plugins {
+			if next, err = plugin.New(ctx, next, plugin.Name()); nil != err {
+				return nil, err
+			}
+		}
+		return next, nil
+	}
+	return constructor
 }

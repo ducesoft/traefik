@@ -5,6 +5,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"github.com/traefik/traefik/v3/pkg/server/middleware"
 	stdlog "log"
 	"net"
 	"net/http"
@@ -87,6 +88,9 @@ func (h *httpForwarder) ServeTCP(conn tcp.WriteCloser) {
 func (h *httpForwarder) Accept() (net.Conn, error) {
 	select {
 	case conn := <-h.connChan:
+		if sc, ok := conn.(*tcp.StatefulWriteCloser); ok {
+			return sc.Conn, nil
+		}
 		return conn, nil
 	case err := <-h.errChan:
 		return nil, err
@@ -382,7 +386,7 @@ func (e *TCPEntryPoint) SwitchRouter(rt *tcprouter.Router) {
 // connection type that was found to satisfy WriteCloser.
 type writeCloserWrapper struct {
 	net.Conn
-	writeCloser tcp.WriteCloser
+	writeCloser tcp.Conn
 }
 
 func (c *writeCloserWrapper) CloseWrite() error {
@@ -398,9 +402,9 @@ func writeCloser(conn net.Conn) (tcp.WriteCloser, error) {
 		if !ok {
 			return nil, errors.New("underlying connection is not a tcp connection")
 		}
-		return &writeCloserWrapper{writeCloser: underlying, Conn: typedConn}, nil
+		return tcp.StatefulConn(&writeCloserWrapper{writeCloser: underlying, Conn: typedConn}), nil
 	case *net.TCPConn:
-		return typedConn, nil
+		return tcp.StatefulConn(typedConn), nil
 	default:
 		return nil, fmt.Errorf("unknown connection type %T", typedConn)
 	}
@@ -598,7 +602,7 @@ func createHTTPServer(ctx context.Context, ln net.Listener, configuration *stati
 
 	httpSwitcher := middlewares.NewHandlerSwitcher(router.BuildDefaultHTTPRouter())
 
-	next, err := alice.New(requestdecorator.WrapHandler(reqDecorator)).Then(httpSwitcher)
+	next, err := alice.New(middleware.BuildGlobalMiddleware(ctx), requestdecorator.WrapHandler(reqDecorator)).Then(httpSwitcher)
 	if err != nil {
 		return nil, err
 	}

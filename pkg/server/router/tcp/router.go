@@ -28,6 +28,8 @@ type Router struct {
 	// Contains HTTPS routes.
 	muxerHTTPS tcpmuxer.Muxer
 
+	// TCP handler plugin
+	tcpHandler tcp.Handler
 	// Forwarder handlers.
 	// httpForwarder handles all HTTP requests.
 	httpForwarder tcp.Handler
@@ -83,6 +85,15 @@ func (r *Router) GetTLSGetClientInfo() func(info *tls.ClientHelloInfo) (*tls.Con
 
 // ServeTCP forwards the connection to the right TCP/HTTP handler.
 func (r *Router) ServeTCP(conn tcp.WriteCloser) {
+	if nil != r.tcpHandler {
+		r.tcpHandler.ServeTCP(conn)
+		return
+	}
+	r.ServeTCPRoute(conn)
+}
+
+// ServeTCPRoute forwards the connection to the right TCP/HTTP handler.
+func (r *Router) ServeTCPRoute(conn tcp.WriteCloser) {
 	// Handling Non-TLS TCP connection early if there is neither HTTP(S) nor TLS routers on the entryPoint,
 	// and if there is at least one non-TLS TCP router.
 	// In the case of a non-TLS TCP client (that does not "send" first),
@@ -114,10 +125,15 @@ func (r *Router) ServeTCP(conn tcp.WriteCloser) {
 		// we still need to reply with a 404.
 	}
 
+	// Set a deadline for reading
+	err := conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+	if nil != err {
+		log.Error().Err(err).Msg("Error setting deadline")
+	}
 	// TODO -- Check if ProxyProtocol changes the first bytes of the request
 	br := bufio.NewReader(conn)
 	postgres, err := isPostgres(br)
-	if err != nil {
+	if err != nil && !IsTimeout(err) {
 		conn.Close()
 		return
 	}
@@ -133,9 +149,12 @@ func (r *Router) ServeTCP(conn tcp.WriteCloser) {
 	}
 
 	hello, err := clientHelloInfo(br)
-	if err != nil {
+	if err != nil && !IsTimeout(err) {
 		conn.Close()
 		return
+	}
+	if IsTimeout(err) {
+		hello = &clientHello{}
 	}
 
 	// Remove read/write deadline and delegate this to underlying TCP server (for now only handled by HTTP Server)
@@ -154,9 +173,9 @@ func (r *Router) ServeTCP(conn tcp.WriteCloser) {
 		handler, _ := r.muxerTCP.Match(connData)
 		switch {
 		case handler != nil:
-			handler.ServeTCP(r.GetConn(conn, hello.peeked))
+			handler.ServeTCP(Accept(hello, r.GetConn(conn, hello.peeked)))
 		case r.httpForwarder != nil:
-			r.httpForwarder.ServeTCP(r.GetConn(conn, hello.peeked))
+			r.httpForwarder.ServeTCP(Accept(hello, r.GetConn(conn, hello.peeked)))
 		default:
 			conn.Close()
 		}
@@ -179,14 +198,14 @@ func (r *Router) ServeTCP(conn tcp.WriteCloser) {
 		// In order not to depart from the behavior in 2.6,
 		// we only allow an HTTPS router to take precedence over a TCP-TLS router if it is _not_ an HostSNI(*) router
 		// (so basically any router that has a specific HostSNI based rule).
-		handlerHTTPS.ServeTCP(r.GetConn(conn, hello.peeked))
+		handlerHTTPS.ServeTCP(Accept(hello, r.GetConn(conn, hello.peeked)))
 		return
 	}
 
 	// Contains also TCP TLS passthrough routes.
 	handlerTCPTLS, catchAllTCPTLS := r.muxerTCPTLS.Match(connData)
 	if handlerTCPTLS != nil && !catchAllTCPTLS {
-		handlerTCPTLS.ServeTCP(r.GetConn(conn, hello.peeked))
+		handlerTCPTLS.ServeTCP(Accept(hello, r.GetConn(conn, hello.peeked)))
 		return
 	}
 
@@ -194,19 +213,19 @@ func (r *Router) ServeTCP(conn tcp.WriteCloser) {
 	// We end up here for e.g. an HTTPS router that only has a PathPrefix rule,
 	// which under the scenes is counted as an HostSNI(*) rule.
 	if handlerHTTPS != nil {
-		handlerHTTPS.ServeTCP(r.GetConn(conn, hello.peeked))
+		handlerHTTPS.ServeTCP(Accept(hello, r.GetConn(conn, hello.peeked)))
 		return
 	}
 
 	// Fallback on TCP TLS catchAll.
 	if handlerTCPTLS != nil {
-		handlerTCPTLS.ServeTCP(r.GetConn(conn, hello.peeked))
+		handlerTCPTLS.ServeTCP(Accept(hello, r.GetConn(conn, hello.peeked)))
 		return
 	}
 
 	// To handle 404s for HTTPS.
 	if r.httpsForwarder != nil {
-		r.httpsForwarder.ServeTCP(r.GetConn(conn, hello.peeked))
+		r.httpsForwarder.ServeTCP(Accept(hello, r.GetConn(conn, hello.peeked)))
 		return
 	}
 
@@ -315,6 +334,11 @@ func (r *Router) SetHTTPHandler(handler http.Handler) {
 func (r *Router) SetHTTPSHandler(handler http.Handler, config *tls.Config) {
 	r.httpsHandler = handler
 	r.httpsTLSConfig = config
+}
+
+// SetTCPHandler attaches tcp handlers on the router.
+func (r *Router) SetTCPHandler(handler tcp.Handler) {
+	r.tcpHandler = handler
 }
 
 // Conn is a connection proxy that handles Peeked bytes.
@@ -445,3 +469,17 @@ func (c helloSniffConn) Read(p []byte) (int, error) { return c.r.Read(p) }
 
 // Write crashes all the time.
 func (helloSniffConn) Write(p []byte) (int, error) { return 0, io.EOF }
+
+func IsTimeout(err error) bool {
+	if nil == err {
+		return false
+	}
+	switch x := err.(type) {
+	case nil:
+		return false
+	case *net.OpError:
+		return x.Timeout()
+	default:
+		return false
+	}
+}
