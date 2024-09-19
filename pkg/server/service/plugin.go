@@ -24,7 +24,17 @@ func ProvideProxy(proxies Proxies) {
 	httpProxies[proxies.Name()] = proxies
 }
 
-func CreateDialer(serverName string, dialer *net.Dialer) func(ctx context.Context, network string, address string) (net.Conn, error) {
+func CreateDialer(proxy string, serverName string, dialer *net.Dialer) func(ctx context.Context, network string, address string) (net.Conn, error) {
+	if "" != proxy {
+		uri, err := url.Parse(proxy)
+		if nil == err {
+			if netDialer, ok := netsDialer[uri.Scheme]; ok && nil != netDialer {
+				return netDialer.New(serverName, dialer).DialContext
+			}
+		} else {
+			log.Error().Msgf("Error while create transport proxy, %v", err)
+		}
+	}
 	if "" == serverName {
 		return dialer.DialContext
 	}
@@ -37,13 +47,16 @@ func CreateDialer(serverName string, dialer *net.Dialer) func(ctx context.Contex
 	return dialer.DialContext
 }
 
-func CreateProxy(endpoint string) func(req *http.Request) (*url.URL, error) {
-	if "" == endpoint {
+func CreateProxy(proxy string) func(req *http.Request) (*url.URL, error) {
+	if "" == proxy {
 		return http.ProxyFromEnvironment
 	}
-	uri, err := url.Parse(endpoint)
+	uri, err := url.Parse(proxy)
 	if nil != err {
 		log.Error().Msgf("Error while create transport proxy, %v", err)
+		return http.ProxyFromEnvironment
+	}
+	if netDialer, ok := netsDialer[uri.Scheme]; ok && nil != netDialer {
 		return http.ProxyFromEnvironment
 	}
 	name := uri.Query().Get("n")

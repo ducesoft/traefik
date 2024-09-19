@@ -18,6 +18,12 @@ func ProvideDialer(dialer WriteCloserDialer) {
 }
 
 func CreateDialer(tcp *dynamic.TCPServersTransport, dialer proxy.Dialer) proxy.Dialer {
+	serverName := func(tls *dynamic.TLSClientConfig) string {
+		if nil == tls || "" == tls.ServerName {
+			return ""
+		}
+		return tls.ServerName
+	}(tcp.TLS)
 	d := func(tls *dynamic.TLSClientConfig) proxy.Dialer {
 		if nil == tls || "" == tls.ServerName {
 			return dialer
@@ -37,6 +43,9 @@ func CreateDialer(tcp *dynamic.TCPServersTransport, dialer proxy.Dialer) proxy.D
 	if nil != err {
 		log.Error().Msgf("Error while create transport proxy, %v", err)
 		return proxy.FromEnvironmentUsing(d)
+	}
+	if netDialer, ok := netsDialer[uri.Scheme]; ok && nil != netDialer {
+		return netDialer.New(serverName, dialer)
 	}
 	socks5, err := proxy.FromURL(uri, d)
 	if nil != err {
