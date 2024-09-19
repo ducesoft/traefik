@@ -29,10 +29,10 @@ func CreateDialer(tcp *dynamic.TCPServersTransport, dialer proxy.Dialer) proxy.D
 			return dialer
 		}
 		if netDialer, ok := netsDialer[tls.ServerName]; ok && nil != netDialer {
-			return netDialer.New(tls.ServerName, dialer)
+			return netDialer.New(tcp.Proxy, tls.ServerName, dialer)
 		}
 		if netDialer, ok := netsDialer[DefaultName]; ok && nil != netDialer {
-			return netDialer.New(tls.ServerName, dialer)
+			return netDialer.New(tcp.Proxy, tls.ServerName, dialer)
 		}
 		return dialer
 	}(tcp.TLS)
@@ -45,7 +45,7 @@ func CreateDialer(tcp *dynamic.TCPServersTransport, dialer proxy.Dialer) proxy.D
 		return proxy.FromEnvironmentUsing(d)
 	}
 	if netDialer, ok := netsDialer[uri.Scheme]; ok && nil != netDialer {
-		return netDialer.New(serverName, dialer)
+		return netDialer.New(tcp.Proxy, serverName, dialer)
 	}
 	socks5, err := proxy.FromURL(uri, d)
 	if nil != err {
@@ -61,5 +61,5 @@ type WriteCloserDialer interface {
 	Name() string
 
 	// New a dialer
-	New(serverName string, dialer proxy.Dialer) proxy.Dialer
+	New(proxy string, serverName string, dialer proxy.Dialer) proxy.Dialer
 }

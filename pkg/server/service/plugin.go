@@ -29,7 +29,7 @@ func CreateDialer(proxy string, serverName string, dialer *net.Dialer) func(ctx 
 		uri, err := url.Parse(proxy)
 		if nil == err {
 			if netDialer, ok := netsDialer[uri.Scheme]; ok && nil != netDialer {
-				return netDialer.New(serverName, dialer).DialContext
+				return netDialer.New(proxy, serverName, dialer).DialContext
 			}
 		} else {
 			log.Error().Msgf("Error while create transport proxy, %v", err)
@@ -39,10 +39,10 @@ func CreateDialer(proxy string, serverName string, dialer *net.Dialer) func(ctx 
 		return dialer.DialContext
 	}
 	if netDialer, ok := netsDialer[serverName]; ok && nil != netDialer {
-		return netDialer.New(serverName, dialer).DialContext
+		return netDialer.New(proxy, serverName, dialer).DialContext
 	}
 	if netDialer, ok := netsDialer[DefaultName]; ok && nil != netDialer {
-		return netDialer.New(serverName, dialer).DialContext
+		return netDialer.New(proxy, serverName, dialer).DialContext
 	}
 	return dialer.DialContext
 }
@@ -93,5 +93,5 @@ type ContextDialer interface {
 	Name() string
 
 	// New a dialer
-	New(serverName string, dialer *net.Dialer) proxy.ContextDialer
+	New(proxy string, serverName string, dialer *net.Dialer) proxy.ContextDialer
 }
