@@ -119,7 +119,7 @@ func (r *Router) ServeTCPRoute(conn tcp.WriteCloser) {
 	}
 
 	// Set a deadline for reading
-	err := conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+	err := conn.SetReadDeadline(time.Now().Add(12 * time.Second))
 	if nil != err {
 		log.Error().Err(err).Msg("Error setting deadline")
 	}
