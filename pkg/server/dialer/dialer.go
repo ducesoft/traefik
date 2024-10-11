@@ -12,91 +12,235 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/traefik/traefik/v3/pkg/config/dynamic"
 	"golang.org/x/net/proxy"
+	"math"
 	"net"
+	"net/http"
 	"net/url"
+	"sort"
 )
 
-func NewDialer(ctx context.Context, options ...Option) Dialer {
-	v := d
+func init() {
+	Provide(new(proxyNextDialer))
+}
+
+func NewDialer(ctx context.Context, options ...Fn) Dialer {
+	d := &dialer{}
 	for _, o := range options {
-		if n, err := o(ctx, d); nil != err {
-			log.Error().Msgf("Error while create transport proxy, %v", err)
-		} else {
-			v = n.Next(ctx, v)
+		o(d)
+	}
+	for _, connector := range connectors {
+		if connector.Match(ctx, d) {
+			d.overlays = append(d.overlays, connector)
 		}
 	}
-	return v
+	return d
 }
 
-func Provide(name string, dialer NextDialer) {
-	dials[name] = dialer
+func NewProxy(ctx context.Context, options ...Fn) Proxy {
+	//d := &dialer{}
+	//for _, o := range options {
+	//	o(d)
+	//}
+	//for _, connector := range connectors {
+	//	if connector.Match(ctx, d) {
+	//		d.overlays = append(d.overlays, connector)
+	//	}
+	//}
+	//return d
+	return http.ProxyFromEnvironment
 }
 
-func WithDialer(d proxy.Dialer)Option {
-
+func Provide(dialer NextDialer) {
+	connectors = append(connectors, dialer)
+	sort.SliceStable(connectors, func(i, j int) bool {
+		return connectors[i].Priority() > connectors[j].Priority()
+	})
 }
 
-func WithString(name string) Option {
-	return func(ctx context.Context) (NextDialer, error) {
-		if d, ok := dials[name]; ok && nil != d {
-			return d.Next(ctx, d), nil
+func WithProxy(proxy string) Fn {
+	return func(option *dialer) {
+		if "" == proxy {
+			return
 		}
-	}
-}
-
-func WithURL(uri string) Option {
-	return func(d *dialer) error {
-		u, err := url.Parse(uri)
+		uri, err := url.Parse(proxy)
 		if nil != err {
-			return err
+			log.Error().Msgf("Error while create transport proxy, %v", err)
+			return
 		}
-		d.names = append(d.names, u.Scheme)
-		return nil
+		option.proxy = uri
 	}
 }
 
-func WithTCP(tcp *dynamic.TCPServersTransport) Option {
-	return func(d *dialer) error {
+func WithTCP(tcp *dynamic.TCPServersTransport) Fn {
+	return func(option *dialer) {
+		if nil != tcp {
+			WithProxy(tcp.Proxy)(option)
+		}
 		if nil != tcp && nil != tcp.TLS {
-			d.names = append(d.names, tcp.TLS.ServerName)
+			option.serverName = tcp.TLS.ServerName
 		}
-		return nil
 	}
 }
 
-func WithProxy(proxy string) Option {
-	return func(d *dialer) error {
-		d.names = append(d.names, proxy)
-		return nil
+func WithALP(tcp *dynamic.ServersTransport) Fn {
+	return func(option *dialer) {
+		if nil != tcp {
+			WithProxy(tcp.Proxy)(option)
+			option.serverName = tcp.ServerName
+		}
 	}
+}
 
+func WithDialer(d proxy.Dialer) Fn {
+	return func(option *dialer) {
+		option.underlay = &proxyDialer{d: d}
+	}
+}
+
+func WithContextDialer(d proxy.ContextDialer) Fn {
+	return func(option *dialer) {
+		option.underlay = &contextDialer{d: d}
+	}
 }
 
 var (
-	_     Dialer = new(dialer)
-	dials        = map[string]NextDialer{}
+	_          Dialer = new(dialer)
+	connectors []NextDialer
 )
 
-type Option func(ctx context.Context, d Dialer) (NextDialer, error)
+type Option interface {
+	Proxy() *url.URL
+	ServerName() string
+}
+
+type Proxy func(req *http.Request) (*url.URL, error)
+
+type NextDialer interface {
+
+	// Priority max will be Dial first
+	Priority() int
+
+	// Match the provider
+	Match(ctx context.Context, option Option) bool
+
+	// Next a dialer
+	Next(ctx context.Context, option Option, dialer Dialer) Dialer
+
+	// Proxy a dialer
+	Proxy(ctx context.Context, option Option, proxy Proxy) Proxy
+}
+
+var _ NextDialer = new(proxyNextDialer)
+
+type proxyNextDialer struct {
+}
+
+func (that *proxyNextDialer) Priority() int {
+	return math.MaxInt
+}
+
+func (that *proxyNextDialer) Match(ctx context.Context, option Option) bool {
+	return true
+}
+
+func (that *proxyNextDialer) Next(ctx context.Context, option Option, dialer Dialer) Dialer {
+	if nil == option.Proxy() {
+		return &proxyDialer{d: proxy.FromEnvironmentUsing(dialer)}
+	}
+	socks5, err := proxy.FromURL(option.Proxy(), dialer)
+	if nil != err {
+		log.Error().Msgf("Error while create transport proxy, %v", err)
+		return &proxyDialer{d: proxy.FromEnvironmentUsing(dialer)}
+	}
+	return &proxyDialer{d: socks5}
+}
+
+func (that *proxyNextDialer) Proxy(ctx context.Context, option Option, proxy Proxy) Proxy {
+	if nil == option.Proxy() {
+		return proxy
+	}
+	return proxy
+}
+
+type Fn func(d *dialer)
 
 type Dialer interface {
 	proxy.Dialer
 	proxy.ContextDialer
 }
 
-type dialer struct {
-	names []string
-	d     Dialer
+type proxyDialer struct {
+	d proxy.Dialer
 }
 
-func (that *dialer) Dial(network, addr string) (net.Conn, error) {
+func (that *proxyDialer) Dial(network, addr string) (net.Conn, error) {
 	return that.d.Dial(network, addr)
 }
 
-func (that *dialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+func (that *proxyDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	return that.Dial(network, address)
+}
+
+type contextDialer struct {
+	d proxy.ContextDialer
+}
+
+func (that *contextDialer) Dial(network, addr string) (net.Conn, error) {
+	return that.DialContext(context.Background(), network, addr)
+}
+
+func (that *contextDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	return that.d.DialContext(ctx, network, address)
 }
 
-type NextDialer interface {
-	Next(ctx context.Context, dialer Dialer) Dialer
+type dialer struct {
+	proxy      *url.URL
+	serverName string
+	underlay   Dialer
+	overlays   []NextDialer
 }
+
+func (that *dialer) Proxy() *url.URL {
+	return that.proxy
+}
+
+func (that *dialer) ServerName() string {
+	return that.serverName
+}
+
+func (that *dialer) Dial(network, addr string) (net.Conn, error) {
+	return that.DialContext(context.Background(), network, addr)
+}
+
+func (that *dialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	if len(that.overlays) < 1 {
+		return that.underlay.DialContext(ctx, network, address)
+	}
+	d := that.underlay
+	for _, overlay := range that.overlays {
+		d = overlay.Next(ctx, that, d)
+	}
+	return d.DialContext(ctx, network, address)
+}
+
+//func x() {
+//	uri, err := url.Parse(tcp.Proxy)
+//	if nil != err {
+//		log.Error().Msgf("Error while create transport proxy, %v", err)
+//		return http.ProxyFromEnvironment
+//	}
+//	if netDialer, ok := netsDialer[uri.Scheme]; ok && nil != netDialer {
+//		return http.ProxyFromEnvironment
+//	}
+//	name := uri.Query().Get("n")
+//	if "" == name {
+//		return http.ProxyURL(uri)
+//	}
+//	if proxies, ok := httpProxies[name]; ok && nil != proxies {
+//		query := uri.Query()
+//		query.Del("n")
+//		uri.RawQuery = query.Encode()
+//		return proxies.New(uri.String()).Proxy
+//	}
+//	return http.ProxyFromEnvironment
+//}

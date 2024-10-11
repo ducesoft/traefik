@@ -1,12 +1,16 @@
 package service
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/traefik/traefik/v3/pkg/server/dialer"
+	"golang.org/x/net/proxy"
 	"net"
 	"net/http"
+	"net/url"
 	"reflect"
 	"sync"
 	"time"
@@ -131,8 +135,8 @@ func (r *RoundTripperManager) createRoundTripper(cfg *dynamic.ServersTransport) 
 	}
 
 	transport := &http.Transport{
-		Proxy:                 CreateProxy(cfg.Proxy),
-		DialContext:           CreateDialer(cfg.Proxy, cfg.ServerName, dialer),
+		Proxy:                 nextProxy(cfg, dialer),
+		DialContext:           nextDialer(cfg, dialer).DialContext,
 		MaxIdleConnsPerHost:   cfg.MaxIdleConnsPerHost,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
@@ -231,4 +235,12 @@ func buildSpiffeAuthorizer(cfg *dynamic.Spiffe) (tlsconfig.Authorizer, error) {
 	default:
 		return tlsconfig.AuthorizeAny(), nil
 	}
+}
+
+func nextDialer(tcp *dynamic.ServersTransport, d proxy.Dialer) dialer.Dialer {
+	return dialer.NewDialer(context.Background(), dialer.WithDialer(d), dialer.WithALP(tcp))
+}
+
+func nextProxy(tcp *dynamic.ServersTransport, d proxy.Dialer) func(req *http.Request) (*url.URL, error) {
+	return dialer.NewProxy(context.Background(), dialer.WithDialer(d), dialer.WithALP(tcp))
 }

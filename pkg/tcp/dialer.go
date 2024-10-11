@@ -1,10 +1,12 @@
 package tcp
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/traefik/traefik/v3/pkg/server/dialer"
 	"net"
 	"sync"
 	"time"
@@ -151,8 +153,8 @@ func (d *DialerManager) createDialers(name string, cfg *dynamic.TCPServersTransp
 		Config:    tlsConfig,
 	}
 
-	d.dialers[name] = tcpDialer{CreateDialer(cfg, dialer), time.Duration(cfg.TerminationDelay)}
-	d.dialersTLS[name] = tcpDialer{CreateDialer(cfg, tlsDialer), time.Duration(cfg.TerminationDelay)}
+	d.dialers[name] = tcpDialer{nextDialer(cfg, dialer), time.Duration(cfg.TerminationDelay)}
+	d.dialersTLS[name] = tcpDialer{nextDialer(cfg, tlsDialer), time.Duration(cfg.TerminationDelay)}
 
 	return nil
 }
@@ -203,4 +205,8 @@ func buildSpiffeAuthorizer(cfg *dynamic.Spiffe) (tlsconfig.Authorizer, error) {
 	default:
 		return tlsconfig.AuthorizeAny(), nil
 	}
+}
+
+func nextDialer(tcp *dynamic.TCPServersTransport, d proxy.Dialer) dialer.Dialer {
+	return dialer.NewDialer(context.Background(), dialer.WithDialer(d), dialer.WithTCP(tcp))
 }
