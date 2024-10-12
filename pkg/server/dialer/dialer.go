@@ -73,6 +73,7 @@ func WithProxy(proxy string) Fn {
 
 func WithTCP(tcp *dynamic.TCPServersTransport) Fn {
 	return func(option *dialer) {
+		option.proto = "TCP"
 		if nil != tcp {
 			WithProxy(tcp.Proxy)(option)
 		}
@@ -84,6 +85,7 @@ func WithTCP(tcp *dynamic.TCPServersTransport) Fn {
 
 func WithALP(tcp *dynamic.ServersTransport) Fn {
 	return func(option *dialer) {
+		option.proto = "ALP"
 		if nil != tcp {
 			WithProxy(tcp.Proxy)(option)
 			option.serverName = tcp.ServerName
@@ -109,6 +111,7 @@ var (
 )
 
 type Option interface {
+	Proto() string
 	Proxy() *url.URL
 	ServerName() string
 }
@@ -194,10 +197,15 @@ func (that *contextDialer) DialContext(ctx context.Context, network, address str
 }
 
 type dialer struct {
+	proto      string
 	proxy      *url.URL
 	serverName string
 	underlay   Dialer
 	overlays   []NextDialer
+}
+
+func (that *dialer) Proto() string {
+	return that.proto
 }
 
 func (that *dialer) Proxy() *url.URL {
