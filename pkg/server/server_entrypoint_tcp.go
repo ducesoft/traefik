@@ -5,6 +5,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"github.com/traefik/traefik/v3/pkg/server/middleware"
 	stdlog "log"
 	"net"
 	"net/http"
@@ -278,7 +279,7 @@ func (e *TCPEntryPoint) Start(ctx context.Context) {
 				}
 			}
 
-			e.switcher.ServeTCP(newTrackedConnection(writeCloser, e.tracker))
+			e.switcher.ServeTCP(tcp.NewNextConn(newTrackedConnection(writeCloser, e.tracker)))
 		})
 	}
 }
@@ -601,7 +602,7 @@ func createHTTPServer(ctx context.Context, ln net.Listener, configuration *stati
 
 	httpSwitcher := middlewares.NewHandlerSwitcher(router.BuildDefaultHTTPRouter())
 
-	next, err := alice.New(requestdecorator.WrapHandler(reqDecorator)).Then(httpSwitcher)
+	next, err := alice.New(middleware.GlobalFilters(ctx), requestdecorator.WrapHandler(reqDecorator)).Then(httpSwitcher)
 	if err != nil {
 		return nil, err
 	}

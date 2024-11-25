@@ -30,6 +30,8 @@ type Router struct {
 	// Contains HTTPS routes.
 	muxerHTTPS tcpmuxer.Muxer
 
+	// TCP handler plugin
+	tcpHandler tcp.Handler
 	// Forwarder handlers.
 	// httpForwarder handles all HTTP requests.
 	httpForwarder tcp.Handler
@@ -85,6 +87,15 @@ func (r *Router) GetTLSGetClientInfo() func(info *tls.ClientHelloInfo) (*tls.Con
 
 // ServeTCP forwards the connection to the right TCP/HTTP handler.
 func (r *Router) ServeTCP(conn tcp.WriteCloser) {
+	if nil != r.tcpHandler {
+		r.tcpHandler.ServeTCP(conn)
+		return
+	}
+	r.ServeTCPRoute(conn)
+}
+
+// ServeTCPRoute forwards the connection to the right TCP/HTTP handler.
+func (r *Router) ServeTCPRoute(conn tcp.WriteCloser) {
 	// Handling Non-TLS TCP connection early if there is neither HTTP(S) nor TLS routers on the entryPoint,
 	// and if there is at least one non-TLS TCP router.
 	// In the case of a non-TLS TCP client (that does not "send" first),
@@ -323,6 +334,11 @@ func (r *Router) EnableACMETLSPassthrough() {
 	r.acmeTLSPassthrough = true
 }
 
+// SetTCPHandler attaches tcp handlers on the router.
+func (r *Router) SetTCPHandler(handler tcp.Handler) {
+	r.tcpHandler = handler
+}
+
 // Conn is a connection proxy that handles Peeked bytes.
 type Conn struct {
 	// Peeked are the bytes that have been read from Conn for the purposes of route matching,
@@ -354,6 +370,31 @@ type clientHello struct {
 	protos     []string // ALPN protocols list
 	isTLS      bool     // whether we are a TLS handshake
 	peeked     string   // the bytes peeked from the hello while getting the info
+}
+
+func (that *clientHello) ServerName() string {
+	return that.serverName
+}
+
+func (that *clientHello) Protos() []string {
+	return that.protos
+}
+
+func (that *clientHello) IsTLS() bool {
+	return that.isTLS
+}
+
+func (that *clientHello) Peeked() string {
+	return that.peeked
+}
+
+func ClientHelloInfo(conn tcp.WriteCloser) (tcp.Hello, tcp.WriteCloser, error) {
+	br := bufio.NewReader(conn)
+	hello, err := clientHelloInfo(br)
+	if nil != err {
+		return nil, nil, err
+	}
+	return hello, &Conn{Peeked: []byte(hello.Peeked()), WriteCloser: conn}, nil
 }
 
 // clientHelloInfo returns various data from the clientHello handshake,

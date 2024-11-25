@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"github.com/traefik/traefik/v3/pkg/middlewares/accesslog"
 	"math"
 	"net/http"
 	"strings"
@@ -104,6 +105,11 @@ func (m *Manager) buildEntryPointHandler(ctx context.Context, configs map[string
 	if err != nil {
 		return nil, err
 	}
+	h, err := tcp.NewChain(tcp.GlobalFilters(ctx)).Then(tcp.HandlerFunc(func(conn tcp.WriteCloser) { router.ServeTCPRoute(conn) }))
+	if nil != err {
+		return nil, err
+	}
+	router.SetTCPHandler(h)
 
 	router.SetHTTPHandler(handlerHTTP)
 
@@ -179,7 +185,9 @@ func (m *Manager) buildEntryPointHandler(ctx context.Context, configs map[string
 			//	# When a request for "/foo" comes, even though it won't be routed by httpRouter2,
 			//	# if its SNI is set to foo.com, myTLSOptions will be used for the TLS connection.
 			//	# Otherwise, it will fallback to the default TLS config.
-			logger.Warn().Msgf("No domain found in rule %v, the TLS options applied for this router will depend on the SNI of each request", routerHTTPConfig.Rule)
+			if nil != routerHTTPConfig.TLS && "" == routerHTTPConfig.TLS.Options {
+				logger.Warn().Msgf("No domain found in rule %v, the TLS options applied for this router will depend on the SNI of each request", routerHTTPConfig.Rule)
+			}
 		}
 
 		// Even though the error is seemingly ignored (aside from logging it),
@@ -316,6 +324,7 @@ func (m *Manager) addTCPHandlers(ctx context.Context, configs map[string]*runtim
 				logger.Error().Err(err).Send()
 				continue
 			}
+			handler = tcp.NewFieldHandler(handler, map[string]any{accesslog.RouterName: routerName})
 		}
 
 		if routerConfig.TLS == nil {
