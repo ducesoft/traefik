@@ -397,7 +397,7 @@ func (m *Manager) getLoadBalancerServiceHandler(ctx context.Context, serviceName
 			proxy, _ = capture.Wrap(proxy)
 		}
 
-		lb.Add(proxyName, proxy, server.Weight)
+		lb.AddURL(proxyName, proxy, server.Weight, target)
 
 		// servers are considered UP by default.
 		info.UpdateServerStatus(target.String(), runtime.StatusUp)
