@@ -582,7 +582,7 @@ func appendCertMetric(gauge gokitmetrics.Gauge, certificate *x509.Certificate) {
 	gauge.With(labels...).Set(notAfter)
 }
 
-func setupAccessLog(conf *types.AccessLog) *accesslog.Handler {
+func setupAccessLog(conf *types.AccessLog) accesslog.Accesslog {
 	if conf == nil {
 		return nil
 	}

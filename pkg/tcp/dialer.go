@@ -15,6 +15,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
 	"github.com/traefik/traefik/v3/pkg/config/dynamic"
+	next "github.com/traefik/traefik/v3/pkg/server/dialer"
 	traefiktls "github.com/traefik/traefik/v3/pkg/tls"
 	"github.com/traefik/traefik/v3/pkg/types"
 	"golang.org/x/net/proxy"
@@ -146,13 +147,13 @@ func (d *DialerManager) createDialers(name string, cfg *dynamic.TCPServersTransp
 		}
 	}
 
-	tlsDialer := &tls.Dialer{
-		NetDialer: dialer,
-		Config:    tlsConfig,
-	}
+	//tlsDialer := &tls.Dialer{
+	//	NetDialer: dialer,
+	//	Config:    tlsConfig,
+	//}
 
-	d.dialers[name] = tcpDialer{dialer, time.Duration(cfg.TerminationDelay)}
-	d.dialersTLS[name] = tcpDialer{tlsDialer, time.Duration(cfg.TerminationDelay)}
+	d.dialers[name] = tcpDialer{next.NewTCPDialer(cfg, dialer), time.Duration(cfg.TerminationDelay)}
+	d.dialersTLS[name] = tcpDialer{next.NewTLSDialer(cfg, tlsConfig, dialer), time.Duration(cfg.TerminationDelay)}
 
 	return nil
 }
