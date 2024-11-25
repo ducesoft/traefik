@@ -5,6 +5,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"github.com/traefik/traefik/v3/pkg/server/middleware"
 	stdlog "log"
 	"net"
 	"net/http"
@@ -43,6 +44,7 @@ type key string
 const (
 	connStateKey       key    = "connState"
 	debugConnectionEnv string = "DEBUG_CONNECTION"
+	RawConnKey         string = "httpRawConn"
 )
 
 var (
@@ -278,7 +280,7 @@ func (e *TCPEntryPoint) Start(ctx context.Context) {
 				}
 			}
 
-			e.switcher.ServeTCP(newTrackedConnection(writeCloser, e.tracker))
+			e.switcher.ServeTCP(tcp.NewNextConn(newTrackedConnection(writeCloser, e.tracker)))
 		})
 	}
 }
@@ -601,7 +603,7 @@ func createHTTPServer(ctx context.Context, ln net.Listener, configuration *stati
 
 	httpSwitcher := middlewares.NewHandlerSwitcher(router.BuildDefaultHTTPRouter())
 
-	next, err := alice.New(requestdecorator.WrapHandler(reqDecorator)).Then(httpSwitcher)
+	next, err := alice.New(middleware.GlobalFilters(ctx), requestdecorator.WrapHandler(reqDecorator)).Then(httpSwitcher)
 	if err != nil {
 		return nil, err
 	}
@@ -674,6 +676,11 @@ func createHTTPServer(ctx context.Context, ln net.Listener, configuration *stati
 			return prevConnContext(ctx, c)
 		}
 		return ctx
+	}
+
+	finalConnContext := serverHTTP.ConnContext
+	serverHTTP.ConnContext = func(ctx context.Context, c net.Conn) context.Context {
+		return context.WithValue(finalConnContext(ctx, c), RawConnKey, c)
 	}
 
 	// ConfigureServer configures HTTP/2 with the MaxConcurrentStreams option for the given server.
