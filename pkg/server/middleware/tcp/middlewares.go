@@ -135,6 +135,12 @@ func (b *Builder) buildConstructor(ctx context.Context, middlewareName string) (
 		}
 	}
 
+	if m := middlewares[middlewareName]; nil != m {
+		middleware = func(next tcp.Handler) (tcp.Handler, error) {
+			return m.New(ctx, next, middlewareName)
+		}
+	}
+
 	if middleware == nil {
 		return nil, fmt.Errorf("invalid middleware %q configuration: invalid middleware type or middleware does not exist", middlewareName)
 	}

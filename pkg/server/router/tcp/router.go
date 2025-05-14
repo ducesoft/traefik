@@ -239,7 +239,7 @@ func (r *Router) GetConn(conn tcp.WriteCloser, peeked string) tcp.WriteCloser {
 		Peeked:      []byte(peeked),
 		WriteCloser: conn,
 	}
-
+	tcp.SetContextState(conn.Context(), "tls.hello.peeked", peeked)
 	return conn
 }
 
