@@ -37,17 +37,17 @@ func NewDialer(ctx context.Context, options ...Fn) Dialer {
 }
 
 func NewProxy(ctx context.Context, options ...Fn) Proxy {
-	//d := &dialer{}
-	//for _, o := range options {
-	//	o(d)
-	//}
-	//for _, connector := range connectors {
-	//	if connector.Match(ctx, d) {
-	//		d.overlays = append(d.overlays, connector)
-	//	}
-	//}
-	//return d
-	return http.ProxyFromEnvironment
+	d := &dialer{}
+	for _, o := range options {
+		o(d)
+	}
+	p := http.ProxyFromEnvironment
+	for _, connector := range connectors {
+		if connector.Match(ctx, d) {
+			p = connector.Proxy(ctx, d, p)
+		}
+	}
+	return p
 }
 
 func Provide(dialer NextDialer) {
@@ -147,7 +147,7 @@ func (that *proxyNextDialer) Match(ctx context.Context, option Option) bool {
 }
 
 func (that *proxyNextDialer) Next(ctx context.Context, option Option, dialer Dialer) Dialer {
-	if nil == option.Proxy() {
+	if nil == option.Proxy() || option.Proto() == "ALP" {
 		return &proxyDialer{d: proxy.FromEnvironmentUsing(dialer)}
 	}
 	socks5, err := proxy.FromURL(option.Proxy(), dialer)
@@ -162,7 +162,7 @@ func (that *proxyNextDialer) Proxy(ctx context.Context, option Option, proxy Pro
 	if nil == option.Proxy() {
 		return proxy
 	}
-	return proxy
+	return http.ProxyURL(option.Proxy())
 }
 
 type Fn func(d *dialer)
@@ -230,25 +230,3 @@ func (that *dialer) DialContext(ctx context.Context, network, address string) (n
 	}
 	return d.DialContext(ctx, network, address)
 }
-
-//func x() {
-//	uri, err := url.Parse(tcp.Proxy)
-//	if nil != err {
-//		log.Error().Msgf("Error while create transport proxy, %v", err)
-//		return http.ProxyFromEnvironment
-//	}
-//	if netDialer, ok := netsDialer[uri.Scheme]; ok && nil != netDialer {
-//		return http.ProxyFromEnvironment
-//	}
-//	name := uri.Query().Get("n")
-//	if "" == name {
-//		return http.ProxyURL(uri)
-//	}
-//	if proxies, ok := httpProxies[name]; ok && nil != proxies {
-//		query := uri.Query()
-//		query.Del("n")
-//		uri.RawQuery = query.Encode()
-//		return proxies.New(uri.String()).Proxy
-//	}
-//	return http.ProxyFromEnvironment
-//}
