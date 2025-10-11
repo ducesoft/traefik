@@ -4,7 +4,9 @@ import (
 	"container/heap"
 	"context"
 	"errors"
+	"math/rand"
 	"net/http"
+	"net/url"
 	"sync"
 
 	"github.com/rs/zerolog/log"
@@ -17,6 +19,27 @@ type namedHandler struct {
 	name     string
 	weight   float64
 	deadline float64
+	uri      *url.URL
+}
+
+func (that *namedHandler) Name() string {
+	return that.name
+}
+
+func (that *namedHandler) Deadline() float64 {
+	return that.deadline
+}
+
+func (that *namedHandler) URL() *url.URL {
+	return that.uri
+}
+
+func (that *namedHandler) Weight() float64 {
+	return that.weight
+}
+
+func (that *namedHandler) Set(weight float64) {
+	that.weight = weight
 }
 
 // Balancer is a WeightedRoundRobin load balancer based on Earliest Deadline First (EDF).
@@ -29,7 +52,7 @@ type Balancer struct {
 
 	// handlersMu is a mutex to protect the handlers slice, the status and the fenced maps.
 	handlersMu sync.RWMutex
-	handlers   []*namedHandler
+	handlers   []Server
 	// status is a record of which child services of the Balancer are healthy, keyed
 	// by name of child service. A service is initially added to the map when it is
 	// created via Add, and it is later removed or added to the map as needed,
@@ -66,7 +89,7 @@ func (b *Balancer) Len() int { return len(b.handlers) }
 
 // Less implements heap.Interface/sort.Interface.
 func (b *Balancer) Less(i, j int) bool {
-	return b.handlers[i].deadline < b.handlers[j].deadline
+	return b.handlers[i].Deadline() < b.handlers[j].Deadline()
 }
 
 // Swap implements heap.Interface/sort.Interface.
@@ -198,7 +221,7 @@ func (b *Balancer) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	server, err := b.nextServer()
+	server, err := b.NextServer(rw, req)
 	if err != nil {
 		if errors.Is(err, errNoAvailableServer) {
 			http.Error(rw, errNoAvailableServer.Error(), http.StatusServiceUnavailable)
@@ -209,7 +232,7 @@ func (b *Balancer) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	if b.sticky != nil {
-		if err := b.sticky.WriteStickyCookie(rw, server.name); err != nil {
+		if err := b.sticky.WriteStickyCookie(rw, server.Name()); err != nil {
 			log.Error().Err(err).Msg("Error while writing sticky cookie")
 		}
 	}
@@ -222,9 +245,22 @@ func (b *Balancer) AddServer(name string, handler http.Handler, server dynamic.S
 	b.Add(name, handler, server.Weight, server.Fenced)
 }
 
+func (b *Balancer) NextServer(w http.ResponseWriter, req *http.Request) (Server, error) {
+	if ss := Strategy().Next(w, req, b.handlers); len(ss) > 0 && (len(ss) < len(b.handlers) || len(b.handlers) <= 1) {
+		return ss[rand.Intn(len(ss))], nil
+	}
+	return b.nextServer()
+}
+
 // Add adds a handler.
 // A handler with a non-positive weight is ignored.
 func (b *Balancer) Add(name string, handler http.Handler, weight *int, fenced bool) {
+	b.AddURL(name, handler, weight, nil, fenced)
+}
+
+// AddURL adds a handler.
+// A handler with a non-positive weight is ignored.
+func (b *Balancer) AddURL(name string, handler http.Handler, weight *int, uri *url.URL, fenced bool) {
 	w := 1
 	if weight != nil {
 		w = *weight
@@ -234,7 +270,7 @@ func (b *Balancer) Add(name string, handler http.Handler, weight *int, fenced bo
 		return
 	}
 
-	h := &namedHandler{Handler: handler, name: name, weight: float64(w)}
+	h := &namedHandler{Handler: handler, name: name, weight: float64(w), uri: uri}
 
 	b.handlersMu.Lock()
 	h.deadline = b.curDeadline + 1/h.weight

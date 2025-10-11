@@ -8,6 +8,8 @@ import (
 	"net"
 	"time"
 
+	"github.com/traefik/traefik/v3/pkg/middlewares/accesslog"
+
 	"github.com/rs/zerolog/log"
 	"github.com/traefik/traefik/v3/pkg/config/runtime"
 	"github.com/traefik/traefik/v3/pkg/observability/logs"
@@ -86,7 +88,17 @@ func (m *Manager) BuildTCP(rootCtx context.Context, serviceName string) (tcp.Han
 				continue
 			}
 
-			loadBalancer.AddServer(handler)
+			loadBalancer.AddServer(tcp.NewFieldHandler(handler, map[string]any{
+				accesslog.ServiceURL: fmt.Sprintf("%s://%s", func() string {
+					if server.TLS {
+						return "tls"
+					} else {
+						return "tcp"
+					}
+				}(), server.Address),
+				accesslog.ServiceAddr: server.Address,
+				accesslog.ServiceName: serviceName,
+			}))
 			logger.Debug().Msg("Creating TCP server")
 		}
 

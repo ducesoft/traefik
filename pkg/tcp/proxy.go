@@ -40,6 +40,11 @@ func (p *Proxy) ServeTCP(conn WriteCloser) {
 		return
 	}
 
+	ContextVars(conn, map[string]any{
+		ProxyClientAddr: connBackend.LocalAddr().String(),
+		ProxyServerAddr: connBackend.RemoteAddr().String(),
+	})
+
 	// maybe not needed, but just in case
 	defer connBackend.Close()
 	errChan := make(chan error)
