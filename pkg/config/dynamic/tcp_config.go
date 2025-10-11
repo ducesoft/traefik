@@ -78,6 +78,7 @@ type RouterTCPTLSConfig struct {
 	Options      string         `json:"options,omitempty" toml:"options,omitempty" yaml:"options,omitempty" export:"true"`
 	CertResolver string         `json:"certResolver,omitempty" toml:"certResolver,omitempty" yaml:"certResolver,omitempty" export:"true"`
 	Domains      []types.Domain `json:"domains,omitempty" toml:"domains,omitempty" yaml:"domains,omitempty" export:"true"`
+	Plugin       map[string]any `json:"-" toml:"-" yaml:"-" export:"true"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -156,6 +157,8 @@ type TCPServersTransport struct {
 	// means an infinite deadline (i.e. the reading capability is never closed).
 	TerminationDelay ptypes.Duration  `description:"Defines the delay to wait before fully terminating the connection, after one connected peer has closed its writing capability." json:"terminationDelay,omitempty" toml:"terminationDelay,omitempty" yaml:"terminationDelay,omitempty" export:"true"`
 	TLS              *TLSClientConfig `description:"Defines the TLS configuration." json:"tls,omitempty" toml:"tls,omitempty" yaml:"tls,omitempty" label:"allowEmpty" file:"allowEmpty" kv:"allowEmpty" export:"true"`
+	Proxy            string           `description:"Network proxy provider." json:"proxy,omitempty" toml:"proxy,omitempty" yaml:"proxy,omitempty" export:"true"`
+	Plugin           map[string]any   `description:"Plugin name to use for the transport." json:"-" toml:"-" yaml:"-" export:"true"`
 }
 
 // SetDefaults sets the default values for a TCPServersTransport.

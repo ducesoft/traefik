@@ -20,6 +20,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
 	"github.com/traefik/traefik/v3/pkg/config/dynamic"
+	next "github.com/traefik/traefik/v3/pkg/server/dialer"
 	traefiktls "github.com/traefik/traefik/v3/pkg/tls"
 	"github.com/traefik/traefik/v3/pkg/types"
 )
@@ -210,15 +211,18 @@ func (t *TransportManager) createRoundTripper(cfg *dynamic.ServersTransport, tls
 	}
 
 	transport := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           dialer.DialContext,
+		Proxy:                 next.NewHTTPProxy(cfg, dialer),
+		DialContext:           next.NewHTTPDialer(cfg, dialer).DialContext,
+		MaxIdleConns:          cfg.MaxIdleConns,
 		MaxIdleConnsPerHost:   cfg.MaxIdleConnsPerHost,
-		IdleConnTimeout:       90 * time.Second,
+		MaxConnsPerHost:       cfg.MaxConnsPerHost,
+		IdleConnTimeout:       time.Duration(cfg.IdleConnTimeout),
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 		ReadBufferSize:        64 * 1024,
 		WriteBufferSize:       64 * 1024,
 		TLSClientConfig:       tlsConfig,
+		DialTLSContext:        next.NewHTTPSDialer(cfg, tlsConfig, dialer).DialContext,
 	}
 
 	if cfg.ForwardingTimeouts != nil {

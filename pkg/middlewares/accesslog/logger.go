@@ -63,6 +63,16 @@ type handlerParams struct {
 	logDataTable *LogData
 }
 
+type Accesslog interface {
+	ServeHTTP(rw http.ResponseWriter, req *http.Request, next http.Handler)
+	// Close closes the Logger (i.e. the file, drain logHandlerChan, etc).
+	Close() error
+	// Rotate closes and reopens the log file to allow for rotation by an external source.
+	Rotate() error
+	// AliceConstructor returns an alice.Constructor that wraps the Handler (conditionally) in a middleware chain.
+	AliceConstructor() alice.Constructor
+}
+
 // Handler will write each request and its response to the access log.
 type Handler struct {
 	config         *otypes.AccessLog
@@ -89,7 +99,7 @@ func (h *Handler) AliceConstructor() alice.Constructor {
 }
 
 // NewHandler creates a new Handler.
-func NewHandler(ctx context.Context, config *otypes.AccessLog) (*Handler, error) {
+func NewHandler(ctx context.Context, config *otypes.AccessLog) (Accesslog, error) {
 	var file io.WriteCloser = noopCloser{os.Stdout}
 	if len(config.FilePath) > 0 {
 		f, err := openAccessLogFile(config.FilePath)
@@ -98,8 +108,11 @@ func NewHandler(ctx context.Context, config *otypes.AccessLog) (*Handler, error)
 		}
 		file = f
 	}
-	logHandlerChan := make(chan handlerParams, config.BufferingSize)
+	return NewHandlerWithWriter(ctx, config, file)
+}
 
+// NewHandlerWithWriter creates a new Handler.
+func NewHandlerWithWriter(ctx context.Context, config *otypes.AccessLog, writer io.WriteCloser) (Accesslog, error) {
 	var formatter logrus.Formatter
 
 	switch config.Format {
@@ -113,9 +126,15 @@ func NewHandler(ctx context.Context, config *otypes.AccessLog) (*Handler, error)
 		log.Error().Msgf("Unsupported access log format: %q, defaulting to common format instead.", config.Format)
 		formatter = new(CommonLogFormatter)
 	}
+	return NewHandlerWithFormatWriter(ctx, config, writer, formatter)
+}
+
+// NewHandlerWithFormatWriter creates a new Handler.
+func NewHandlerWithFormatWriter(ctx context.Context, config *otypes.AccessLog, writer io.WriteCloser, formatter logrus.Formatter) (Accesslog, error) {
+	logHandlerChan := make(chan handlerParams, config.BufferingSize)
 
 	logger := &logrus.Logger{
-		Out:       file,
+		Out:       writer,
 		Formatter: formatter,
 		Hooks:     make(logrus.LevelHooks),
 		Level:     logrus.InfoLevel,
@@ -158,7 +177,7 @@ func NewHandler(ctx context.Context, config *otypes.AccessLog) (*Handler, error)
 	logHandler := &Handler{
 		config:         config,
 		logger:         logger,
-		file:           file,
+		file:           writer,
 		logHandlerChan: logHandlerChan,
 	}
 

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/tls"
 	"net"
 	"net/http"
@@ -35,6 +36,9 @@ func newSmartRoundTripper(transport *http.Transport, forwardingTimeouts *dynamic
 
 	transportH2C := &h2cTransportWrapper{
 		Transport: &http2.Transport{
+			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+				return transport.DialContext(ctx, network, addr)
+			},
 			DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
 				return net.Dial(network, addr)
 			},

@@ -366,6 +366,20 @@ func (b *Builder) buildConstructor(ctx context.Context, middlewareName string) (
 		}
 	}
 
+	for name, option := range config.Anyone {
+		WithNextFilter(name, func(m NextFilter) {
+			middleware = func(next http.Handler) (http.Handler, error) {
+				return m.Next(ctx, next, middlewareName, option)
+			}
+		})
+	}
+
+	WithFilter(middlewareName, func(m Filter) {
+		middleware = func(next http.Handler) (http.Handler, error) {
+			return m.New(ctx, next, middlewareName)
+		}
+	})
+
 	// Plugin
 	if config.Plugin != nil && !reflect.ValueOf(b.pluginBuilder).IsNil() { // Using "reflect" because "b.pluginBuilder" is an interface.
 		if middleware != nil {

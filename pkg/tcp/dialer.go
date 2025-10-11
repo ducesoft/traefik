@@ -17,27 +17,19 @@ import (
 	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
 	ptypes "github.com/traefik/paerser/types"
 	"github.com/traefik/traefik/v3/pkg/config/dynamic"
+	next "github.com/traefik/traefik/v3/pkg/server/dialer"
 	traefiktls "github.com/traefik/traefik/v3/pkg/tls"
 	"github.com/traefik/traefik/v3/pkg/types"
 )
 
-// ClientConn is the interface that provides information about the client connection.
-type ClientConn interface {
-	// LocalAddr returns the local network address, if known.
-	LocalAddr() net.Addr
-
-	// RemoteAddr returns the remote network address, if known.
-	RemoteAddr() net.Addr
-}
-
 // Dialer is an interface to dial a network connection, with support for PROXY protocol and termination delay.
 type Dialer interface {
-	Dial(network, addr string, clientConn ClientConn) (c net.Conn, err error)
+	Dial(network, addr string, clientConn next.ClientConn) (c net.Conn, err error)
 	TerminationDelay() time.Duration
 }
 
 type tcpDialer struct {
-	dialer           *net.Dialer
+	dialer           next.Dialer
 	terminationDelay time.Duration
 	proxyProtocol    *dynamic.ProxyProtocol
 }
@@ -48,7 +40,7 @@ func (d tcpDialer) TerminationDelay() time.Duration {
 }
 
 // Dial dials a network connection and optionally sends a PROXY protocol header.
-func (d tcpDialer) Dial(network, addr string, clientConn ClientConn) (net.Conn, error) {
+func (d tcpDialer) Dial(network, addr string, clientConn next.ClientConn) (net.Conn, error) {
 	conn, err := d.dialer.Dial(network, addr)
 	if err != nil {
 		return nil, err
@@ -71,7 +63,7 @@ type tcpTLSDialer struct {
 }
 
 // Dial dials a network connection with the wrapped tcpDialer and performs a TLS handshake.
-func (d tcpTLSDialer) Dial(network, addr string, clientConn ClientConn) (net.Conn, error) {
+func (d tcpTLSDialer) Dial(network, addr string, clientConn next.ClientConn) (net.Conn, error) {
 	conn, err := d.tcpDialer.Dial(network, addr, clientConn)
 	if err != nil {
 		return nil, err
@@ -183,10 +175,10 @@ func (d *DialerManager) Build(config *dynamic.TCPServersLoadBalancer, isTLS bool
 	}
 
 	dialer := tcpDialer{
-		dialer: &net.Dialer{
+		dialer: next.NewTCPDialer(st, &net.Dialer{
 			Timeout:   time.Duration(st.DialTimeout),
 			KeepAlive: time.Duration(st.DialKeepAlive),
-		},
+		}),
 		terminationDelay: time.Duration(terminationDelay),
 		proxyProtocol:    proxyProtocol,
 	}
@@ -194,7 +186,20 @@ func (d *DialerManager) Build(config *dynamic.TCPServersLoadBalancer, isTLS bool
 	if !isTLS {
 		return dialer, nil
 	}
-	return tcpTLSDialer{dialer, tlsConfig}, nil
+	return &tlsDialer{d: next.NewTLSProxyProtoDialer(st, tlsConfig, dialer), x: dialer}, nil
+}
+
+type tlsDialer struct {
+	d next.Dialer
+	x next.ProxyProtoDialer
+}
+
+func (that *tlsDialer) Dial(network, addr string, clientConn next.ClientConn) (net.Conn, error) {
+	return that.d.DialContext(next.NewProxyProtoContext(clientConn), network, addr)
+}
+
+func (that *tlsDialer) TerminationDelay() time.Duration {
+	return that.x.TerminationDelay()
 }
 
 func createRootCACertPool(rootCAs []types.FileOrContent) *x509.CertPool {

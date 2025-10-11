@@ -5,6 +5,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"io"
 	stdlog "log"
 	"net"
 	"net/http"
@@ -15,6 +16,9 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/traefik/traefik/v3/pkg/server/middleware"
+	"golang.org/x/net/http2"
 
 	"github.com/containous/alice"
 	gokitmetrics "github.com/go-kit/kit/metrics"
@@ -41,6 +45,7 @@ type key string
 const (
 	connStateKey       key    = "connState"
 	debugConnectionEnv string = "DEBUG_CONNECTION"
+	RawConnKey         string = "httpRawConn"
 )
 
 var (
@@ -289,7 +294,7 @@ func (e *TCPEntryPoint) Start(ctx context.Context) {
 				}
 			}
 
-			e.switcher.ServeTCP(newTrackedConnection(writeCloser, e.tracker))
+			e.switcher.ServeTCP(tcp.NewNextConn(newTrackedConnection(writeCloser, e.tracker)))
 		})
 	}
 }
@@ -640,7 +645,7 @@ func newHTTPServer(ctx context.Context, ln net.Listener, configuration *static.E
 
 	httpSwitcher := middlewares.NewHandlerSwitcher(http.NotFoundHandler())
 
-	next, err := alice.New(requestdecorator.WrapHandler(reqDecorator)).Then(httpSwitcher)
+	next, err := alice.New(middleware.GlobalFilters(ctx), requestdecorator.WrapHandler(reqDecorator)).Then(httpSwitcher)
 	if err != nil {
 		return nil, err
 	}
@@ -686,8 +691,25 @@ func newHTTPServer(ctx context.Context, ln net.Listener, configuration *static.E
 	handler = denyFragment(handler)
 
 	serverHTTP := &http.Server{
-		Protocols:      &protocols,
-		Handler:        handler,
+		Protocols: &protocols,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = &closedReader{r: r.Body}
+			defer func() {
+				if ex := r.Body.Close(); nil != ex {
+					log.Ctx(ctx).Error().Err(ex)
+				}
+			}()
+			if !configuration.Transport.EnableFullDuplex {
+				handler.ServeHTTP(w, r)
+				return
+			}
+			// must enable full duplex before calling ServeHTTP (write header)
+			if rc := http.NewResponseController(w); nil != rc {
+				// not support HTTP/2, ignore it
+				_ = rc.EnableFullDuplex()
+			}
+			handler.ServeHTTP(w, r)
+		}),
 		ErrorLog:       stdlog.New(logs.NoLevel(log.Logger, zerolog.DebugLevel), "", 0),
 		ReadTimeout:    time.Duration(configuration.Transport.RespondingTimeouts.ReadTimeout),
 		WriteTimeout:   time.Duration(configuration.Transport.RespondingTimeouts.WriteTimeout),
@@ -698,7 +720,36 @@ func newHTTPServer(ctx context.Context, ln net.Listener, configuration *static.E
 			MaxDecoderHeaderTableSize: int(configuration.HTTP2.MaxDecoderHeaderTableSize),
 			MaxEncoderHeaderTableSize: int(configuration.HTTP2.MaxEncoderHeaderTableSize),
 		},
+		ConnState: func(conn net.Conn, state http.ConnState) {
+			switch state {
+			case http.StateNew:
+				log.Ctx(ctx).Debug().Msgf("Connect %s->%s", conn.RemoteAddr(), conn.LocalAddr())
+			case http.StateActive:
+				log.Ctx(ctx).Debug().Msgf("Active %s->%s", conn.RemoteAddr(), conn.LocalAddr())
+			case http.StateIdle:
+				log.Ctx(ctx).Debug().Msgf("Idle %s->%s", conn.RemoteAddr(), conn.LocalAddr())
+			case http.StateHijacked:
+				log.Ctx(ctx).Debug().Msgf("Hijacked %s->%s", conn.RemoteAddr(), conn.LocalAddr())
+			case http.StateClosed:
+				log.Ctx(ctx).Debug().Msgf("Closed %s->%s", conn.RemoteAddr(), conn.LocalAddr())
+			}
+		},
 	}
+
+	// ConfigureServer configures HTTP/2 with the MaxConcurrentStreams option for the given server.
+	// Also keeping behavior the same as
+	// https://cs.opensource.google/go/go/+/refs/tags/go1.17.7:src/net/http/server.go;l=3262
+	if !strings.Contains(os.Getenv("GODEBUG"), "http2server=0") {
+		err = http2.ConfigureServer(serverHTTP, &http2.Server{
+			MaxConcurrentStreams: uint32(configuration.HTTP2.MaxConcurrentStreams),
+			NewWriteScheduler:    func() http2.WriteScheduler { return http2.NewPriorityWriteScheduler(nil) },
+		})
+
+		if err != nil {
+			return nil, fmt.Errorf("configure HTTP/2 server: %w", err)
+		}
+	}
+
 	if debugConnection || (configuration.Transport != nil && (configuration.Transport.KeepAliveMaxTime > 0 || configuration.Transport.KeepAliveMaxRequests > 0)) {
 		serverHTTP.ConnContext = func(ctx context.Context, c net.Conn) context.Context {
 			cState := &connState{Start: time.Now()}
@@ -729,6 +780,11 @@ func newHTTPServer(ctx context.Context, ln net.Listener, configuration *static.E
 			return prevConnContext(ctx, c)
 		}
 		return ctx
+	}
+
+	finalConnContext := serverHTTP.ConnContext
+	serverHTTP.ConnContext = func(ctx context.Context, c net.Conn) context.Context {
+		return context.WithValue(finalConnContext(ctx, c), RawConnKey, c)
 	}
 
 	listener := newHTTPForwarder(ln)
@@ -901,4 +957,21 @@ func normalizePath(h http.Handler) http.Handler {
 
 		h.ServeHTTP(rw, r2)
 	})
+}
+
+type closedReader struct {
+	r      io.ReadCloser
+	closed bool
+}
+
+func (that *closedReader) Read(p []byte) (n int, err error) {
+	return that.r.Read(p)
+}
+
+func (that *closedReader) Close() error {
+	if that.closed {
+		return nil
+	}
+	that.closed = true
+	return that.r.Close()
 }
