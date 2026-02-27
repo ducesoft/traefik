@@ -221,6 +221,16 @@ type Conn struct {
 	doneCh   chan struct{}
 }
 
+var _ Connection = (*Conn)(nil)
+
+func (c *Conn) LocalAddr() net.Addr {
+	return c.listener.Addr()
+}
+
+func (c *Conn) RemoteAddr() net.Addr {
+	return c.rAddr
+}
+
 // Read reads up to len(p) bytes into p from the connection.
 // Each call corresponds to at most one datagram.
 // If p is smaller than the datagram, the extra bytes will be discarded.

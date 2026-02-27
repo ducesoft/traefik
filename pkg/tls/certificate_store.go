@@ -129,11 +129,51 @@ func (c *CertificateStore) GetBestCertificate(clientHello *tls.ClientHelloInfo) 
 				certificateData.Certificate.OCSPStaple = staple
 			}
 		}
-
+		log.Debug().Msgf("certificate matched: %s for server name: %s", strings.Join(keys, ","), serverName)
 		return certificateData.Certificate
 	}
 
+	certs := [3][]*CertificateData{}
+	if c.DynamicCerts != nil && c.DynamicCerts.Get() != nil {
+		for domains, cert := range c.DynamicCerts.Get().(map[string]*CertificateData) {
+			for _, certDomain := range strings.Split(domains, ",") {
+				if domain := c.hostnameInSNI(certDomain); "" != domain {
+					certs[0] = append(certs[0], cert)
+				}
+				if "127.0.0.1" != certDomain {
+					certs[1] = append(certs[1], cert)
+					continue
+				}
+				certs[2] = append(certs[2], cert)
+			}
+		}
+	}
+	for _, crts := range certs {
+		if len(crts) > 0 {
+			log.Debug().Msgf("certificate backoff matched for server name: %s", serverName)
+			return crts[0].Certificate
+		}
+	}
+
+	log.Debug().Msgf("no matching certificate found for server name: %s", serverName)
 	return nil
+}
+
+func (c *CertificateStore) hostnameInSNI(name string) string {
+	host := name
+	if len(host) > 0 && host[0] == '[' && host[len(host)-1] == ']' {
+		host = host[1 : len(host)-1]
+	}
+	if i := strings.LastIndex(host, "%"); i > 0 {
+		host = host[:i]
+	}
+	if net.ParseIP(host) != nil {
+		return ""
+	}
+	for len(name) > 0 && name[len(name)-1] == '.' {
+		name = name[:len(name)-1]
+	}
+	return name
 }
 
 // GetCertificate returns the first certificate matching all the given domains.

@@ -30,6 +30,7 @@ var resourceLogFields = map[reflect.Type]resourceMeta{
 	reflect.TypeFor[dynamic.TCPServersTransport](): {logs.ServersTransportName, "TCP servers transport"},
 	reflect.TypeFor[dynamic.UDPRouter]():           {logs.RouterName, "UDP router"},
 	reflect.TypeFor[dynamic.UDPService]():          {logs.ServiceName, "UDP service"},
+	reflect.TypeFor[dynamic.UDPMiddleware]():       {logs.MiddlewareName, "UDP middleware"},
 }
 
 // ResourceStrategy defines how the merge should handle resources.

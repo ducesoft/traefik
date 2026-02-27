@@ -93,7 +93,16 @@ func (m *Manager) BuildTCP(rootCtx context.Context, serviceName string) (tcp.Han
 				continue
 			}
 
-			loadBalancer.Add(server.Address, handler, nil)
+			loadBalancer.Add(server.Address, tcp.NewFieldHandler(handler, map[string]string{
+				tcp.ServiceURL: fmt.Sprintf("%s://%s", func() string {
+					if server.TLS {
+						return "tls"
+					}
+					return "tcp"
+				}(), server.Address),
+				tcp.ServiceAddr: server.Address,
+				tcp.ServiceName: serviceName,
+			}), nil)
 
 			// Servers are considered UP by default.
 			conf.UpdateServerStatus(server.Address, runtime.StatusUp)
@@ -103,7 +112,6 @@ func (m *Manager) BuildTCP(rootCtx context.Context, serviceName string) (tcp.Han
 				TLS:     server.TLS,
 				Dialer:  dialer,
 			}
-
 			logger.Debug().Msg("Creating TCP server")
 		}
 

@@ -32,6 +32,8 @@ type Router struct {
 	// Contains HTTPS routes.
 	muxerHTTPS tcpmuxer.Muxer
 
+	// TCP handler plugin
+	tcpHandler tcp.Handler
 	// Forwarder handlers.
 	// httpForwarder handles all HTTP requests.
 	httpForwarder tcp.Handler
@@ -48,6 +50,7 @@ type Router struct {
 	// hostHTTPTLSConfig contains TLS configs keyed by SNI.
 	// A nil config is the hint to set up a brokenTLSRouter.
 	hostHTTPTLSConfig map[string]*tls.Config // TLS configs keyed by SNI
+	plugin            map[string]map[string]any
 }
 
 // NewRouter returns a new TCP router.
@@ -68,9 +71,11 @@ func NewRouter(providersPrecedence []string) (*Router, error) {
 	}
 
 	return &Router{
-		muxerTCP:    *muxTCP,
-		muxerTCPTLS: *muxTCPTLS,
-		muxerHTTPS:  *muxHTTPS,
+		muxerTCP:          *muxTCP,
+		muxerTCPTLS:       *muxTCPTLS,
+		muxerHTTPS:        *muxHTTPS,
+		hostHTTPTLSConfig: map[string]*tls.Config{},
+		plugin:            map[string]map[string]any{},
 	}, nil
 }
 
@@ -87,6 +92,15 @@ func (r *Router) GetTLSGetClientInfo() func(info *tls.ClientHelloInfo) (*tls.Con
 
 // ServeTCP forwards the connection to the right TCP/HTTP handler.
 func (r *Router) ServeTCP(conn tcp.WriteCloser) {
+	if nil != r.tcpHandler {
+		r.tcpHandler.ServeTCP(conn)
+		return
+	}
+	r.ServeTCPRoute(conn)
+}
+
+// ServeTCPRoute forwards the connection to the right TCP/HTTP handler.
+func (r *Router) ServeTCPRoute(conn tcp.WriteCloser) {
 	// Handling Non-TLS TCP connection early if there is neither HTTP(S) nor TLS routers on the entryPoint,
 	// and if there is at least one non-TLS TCP router.
 	// In the case of a non-TLS TCP client (that does not "send" first),
@@ -235,12 +249,17 @@ func (r *Router) AddTCPRoute(rule string, priority int, providerName string, tar
 }
 
 // AddHTTPTLSConfig defines a handler for a given sniHost and sets the matching tlsConfig.
-func (r *Router) AddHTTPTLSConfig(sniHost string, config *tls.Config) {
+func (r *Router) AddHTTPTLSConfig(sniHost string, config *tls.Config, plugin map[string]any) {
 	if r.hostHTTPTLSConfig == nil {
 		r.hostHTTPTLSConfig = map[string]*tls.Config{}
 	}
 
 	r.hostHTTPTLSConfig[sniHost] = config
+
+	if r.plugin == nil {
+		r.plugin = map[string]map[string]any{}
+	}
+	r.plugin[sniHost] = plugin
 }
 
 // GetHTTPHandler gets the attached http handler.
@@ -255,22 +274,20 @@ func (r *Router) GetHTTPSHandler() http.Handler {
 
 // SetHTTPForwarder sets the tcp handler that will forward the connections to an http handler.
 func (r *Router) SetHTTPForwarder(handler tcp.Handler) {
-	r.httpForwarder = handler
+	r.httpForwarder = tcp.NewALPTCPChain(handler)
 }
 
 // SetHTTPSForwarder sets the tcp handler that will forward the TLS connections to an HTTP handler.
 // It also sets up each TLS handler (with its TLS config) for each Host(SNI) rule we previously kept track of.
 // It sets up a special handler that closes the connection if a TLS config is nil.
 func (r *Router) SetHTTPSForwarder(handler tcp.Handler) {
+	handler = tcp.NewALPTCPChain(handler)
 	for sniHost, tlsConf := range r.hostHTTPTLSConfig {
 		var tcpHandler tcp.Handler
 		if tlsConf == nil {
 			tcpHandler = &brokenTLSRouter{}
 		} else {
-			tcpHandler = &tcp.TLSHandler{
-				Next:   handler,
-				Config: tlsConf,
-			}
+			tcpHandler = tcp.TLSServer(handler, tlsConf, r.plugin[sniHost], r.httpForwarder)
 		}
 
 		rule := fmt.Sprintf(`HostSNI(%q)`, sniHost)
@@ -286,10 +303,7 @@ func (r *Router) SetHTTPSForwarder(handler tcp.Handler) {
 		return
 	}
 
-	r.httpsForwarder = &tcp.TLSHandler{
-		Next:   handler,
-		Config: r.httpsTLSConfig,
-	}
+	r.httpsForwarder = tcp.TLSServer(handler, r.httpsTLSConfig, r.plugin["*"], r.httpForwarder)
 }
 
 // SetHTTPHandler attaches http handlers on the router.
@@ -328,6 +342,11 @@ func (r *Router) acmeTLSALPNHandler() tcp.Handler {
 	})
 }
 
+// SetTCPHandler attaches tcp handlers on the router.
+func (r *Router) SetTCPHandler(handler tcp.Handler) {
+	r.tcpHandler = handler
+}
+
 // brokenTLSRouter is associated to a Host(SNI) rule for which we know the TLS conf is broken.
 // It is used to make sure any attempt to connect to that hostname is closed,
 // since we cannot proceed with the intended TLS conf.
@@ -337,6 +356,13 @@ type brokenTLSRouter struct{}
 func (t *brokenTLSRouter) ServeTCP(conn tcp.WriteCloser) {
 	_ = conn.Close()
 }
+
+type NextConn interface {
+	tcp.NextConn
+	Peeked() []byte
+}
+
+var _ NextConn = new(peekConn)
 
 // peekConn wraps a tcp.WriteCloser with a bufio.Reader for Peek operations
 // and a peeked buffer that accumulates bytes consumed during protocol detection
@@ -384,10 +410,47 @@ func (c *peekConn) Read(p []byte) (int, error) {
 	return c.reader.Read(p)
 }
 
+func (c *peekConn) Raw() net.Conn {
+	return c
+}
+
+func (c *peekConn) Context() context.Context {
+	if nc, ok := c.WriteCloser.(tcp.NextConn); ok {
+		return nc.Context()
+	}
+	return context.Background()
+}
+
+func (c *peekConn) Peeked() []byte {
+	return c.peeked
+}
+
 type clientHello struct {
 	serverName string   // SNI server name
 	protos     []string // ALPN protocols list
 	isTLS      bool     // whether we are a TLS handshake
+}
+
+func (that *clientHello) ServerName() string {
+	return that.serverName
+}
+
+func (that *clientHello) Protos() []string {
+	return that.protos
+}
+
+func (that *clientHello) IsTLS() bool {
+	return that.isTLS
+}
+
+func ClientHelloInfo(conn tcp.WriteCloser) (tcp.Hello, tcp.WriteCloser, error) {
+	pConn := newPeekConn(conn)
+	hello, err := clientHelloInfo(pConn)
+	if nil != err {
+		log.Error().Err(pConn.Close()).Msg("Error while reading client hello")
+		return nil, nil, err
+	}
+	return hello, pConn, nil
 }
 
 // clientHelloInfo returns various data from the clientHello handshake,
