@@ -88,6 +88,22 @@ func (m *Muxer) AddRoute(rule string, syntax string, priority int, handler http.
 	return nil
 }
 
+func (m *Muxer) Parse(expr string) (*Matcher, error) {
+	matcher, err := m.parser.parse("", expr)
+	if nil != err {
+		return nil, err
+	}
+	return &Matcher{m: matcher}, nil
+}
+
+type Matcher struct {
+	m matchersTree
+}
+
+func (that *Matcher) Match(r *http.Request) bool {
+	return that.m.match(r)
+}
+
 // reservedCharacters contains the mapping of the percent-encoded form to the ASCII form
 // of the reserved characters according to https://datatracker.ietf.org/doc/html/rfc3986#section-2.2.
 // By extension to https://datatracker.ietf.org/doc/html/rfc3986#section-2.1 the percent character is also considered a reserved character.

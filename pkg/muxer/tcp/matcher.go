@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -17,6 +18,7 @@ var tcpFuncs = map[string]func(*matchersTree, ...string) error{
 	"ClientIP":      expect1Parameter(clientIP),
 	"HostSNI":       expect1Parameter(hostSNI),
 	"HostSNIRegexp": expect1Parameter(hostSNIRegexp),
+	"PortRegexp":    expect1Parameter(portRegexp),
 }
 
 func expect1Parameter(fn func(*matchersTree, ...string) error) func(*matchersTree, ...string) error {
@@ -59,6 +61,42 @@ func clientIP(tree *matchersTree, clientIP ...string) error {
 		return ok
 	}
 
+	return nil
+}
+
+func portRegexp(tree *matchersTree, ports ...string) error {
+	var ranges [][2]int
+	for _, port := range ports {
+		for _, x := range []string{"-", "/", ":"} {
+			if !strings.Contains(port, x) {
+				continue
+			}
+			vs := strings.Split(strings.TrimSpace(port), x)
+			if len(vs) != 2 {
+				return fmt.Errorf("unexpect PortRegexp matcher: %s", port)
+			}
+			v0, err := strconv.Atoi(vs[0])
+			if nil != err {
+				return fmt.Errorf("unexpect PortRegexp matcher: %s", port)
+			}
+			v1, err := strconv.Atoi(vs[1])
+			if nil != err {
+				return fmt.Errorf("unexpect PortRegexp matcher: %s", port)
+			}
+			ranges = append(ranges, [2]int{v0, v1})
+		}
+	}
+	if len(ranges) < 1 {
+		return fmt.Errorf("unexpect PortRegexp matcher: %s", strings.Join(ports, ", "))
+	}
+	tree.matcher = func(meta ConnData) bool {
+		for _, vs := range ranges {
+			if vs[0] <= meta.port && meta.port <= vs[1] {
+				return true
+			}
+		}
+		return false
+	}
 	return nil
 }
 
