@@ -238,10 +238,15 @@ func (m *Manager) Get(storeName, configName string) (*tls.Config, error) {
 		return nil, fmt.Errorf("building TLS config: %w", err)
 	}
 
-	store := m.getStore(storeName)
-	if store == nil {
-		err = fmt.Errorf("TLS store %s not found", storeName)
+	// Option also can bundle store
+	store := m.getStore(configName)
+	if nil == store {
+		store = m.getStore(storeName)
+		if store == nil {
+			err = fmt.Errorf("TLS store %s not found", storeName)
+		}
 	}
+
 	acmeTLSStore := m.getStore(tlsalpn01.ACMETLS1Protocol)
 	if acmeTLSStore == nil && err == nil {
 		err = fmt.Errorf("ACME TLS store %s not found", tlsalpn01.ACMETLS1Protocol)
@@ -279,7 +284,7 @@ func (m *Manager) Get(storeName, configName string) (*tls.Config, error) {
 		}
 
 		if store == nil {
-			log.Error().Msgf("TLS: No certificate store found with this name: %q, closing connection", storeName)
+			log.Error().Msgf("TLS: No certificate store found with this name: %s/%q, closing connection", configName, storeName)
 
 			// Same comment as above, as in the isACMETLS case.
 			return nil, nil

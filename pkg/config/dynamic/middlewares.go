@@ -58,6 +58,8 @@ type Middleware struct {
 
 	// ingress-nginx middlewares.
 	AuthTLSPassCertificateToUpstream *AuthTLSPassCertificateToUpstream `json:"authTLSPassCertificateToUpstream,omitempty" toml:"-" yaml:"-" label:"-" file:"-" kv:"-" export:"true"`
+	// Anyone extension
+	Anyone map[string]any `json:"-" toml:"-" yaml:"-" export:"true"`
 }
 
 // +k8s:deepcopy-gen=true

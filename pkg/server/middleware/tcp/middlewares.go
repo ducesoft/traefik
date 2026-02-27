@@ -113,6 +113,20 @@ func (b *Builder) buildConstructor(ctx context.Context, middlewareName string) (
 		}
 	}
 
+	for name, option := range config.Anyone {
+		tcp.WithNextFilter(name, func(m tcp.NextFilter) {
+			middleware = func(next tcp.Handler) (tcp.Handler, error) {
+				return m.Next(ctx, next, middlewareName, option)
+			}
+		})
+	}
+
+	tcp.WithFilter(middlewareName, func(m tcp.Filter) {
+		middleware = func(next tcp.Handler) (tcp.Handler, error) {
+			return m.New(ctx, next, middlewareName)
+		}
+	})
+
 	if middleware == nil {
 		return nil, fmt.Errorf("invalid middleware %q configuration: invalid middleware type or middleware does not exist", middlewareName)
 	}
