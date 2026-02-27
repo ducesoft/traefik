@@ -85,6 +85,10 @@ func (r *responseWriterWrapper) Header() http.Header {
 	return r.rw.Header()
 }
 
+func (r *responseWriterWrapper) Unwrap() http.ResponseWriter {
+	return r.rw
+}
+
 func (r *responseWriterWrapper) Write(bytes []byte) (int, error) {
 	r.headersSent = true
 	return r.rw.Write(bytes)

@@ -116,6 +116,12 @@ func mergeConfiguration(configurations dynamic.Configurations, defaultEntryPoint
 		}
 
 		if configuration.UDP != nil {
+			for name, middleware := range configuration.UDP.Middlewares {
+				if conf.UDP.Middlewares == nil {
+					conf.UDP.Middlewares = make(map[string]*dynamic.UDPMiddleware)
+				}
+				conf.UDP.Middlewares[provider.MakeQualifiedName(pvd, name)] = middleware
+			}
 			for routerName, router := range configuration.UDP.Routers {
 				conf.UDP.Routers[provider.MakeQualifiedName(pvd, routerName)] = router
 			}

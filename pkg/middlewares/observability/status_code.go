@@ -17,6 +17,10 @@ type statusCodeRecorder struct {
 	status int
 }
 
+func (s *statusCodeRecorder) Unwrap() http.ResponseWriter {
+	return s.ResponseWriter
+}
+
 // WriteHeader captures the status code for later retrieval.
 func (s *statusCodeRecorder) WriteHeader(status int) {
 	s.status = status

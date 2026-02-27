@@ -158,6 +158,10 @@ func (crw *captureResponseWriter) Header() http.Header {
 	return crw.rw.Header()
 }
 
+func (crw *captureResponseWriter) Unwrap() http.ResponseWriter {
+	return crw.rw
+}
+
 func (crw *captureResponseWriter) Size() int64 {
 	return crw.size
 }

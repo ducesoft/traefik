@@ -8,6 +8,9 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 )
 
 // maxDatagramSize is the maximum size of a UDP datagram.
@@ -19,7 +22,8 @@ var errClosedListener = errors.New("udp: listener closed")
 
 // Listener augments a session-oriented Listener over a UDP PacketConn.
 type Listener struct {
-	pConn *net.UDPConn
+	pConn      *net.UDPConn
+	packetInfo bool
 
 	mu    sync.RWMutex
 	conns map[string]*Conn
@@ -53,6 +57,20 @@ func ListenPacketConn(packetConn net.PacketConn, timeout time.Duration) (*Listen
 		timeout:   timeout,
 	}
 
+	if pConn.LocalAddr().(*net.UDPAddr).IP.IsUnspecified() {
+		var err error
+		if pConn.LocalAddr().(*net.UDPAddr).IP.To4() != nil {
+			err = ipv4.NewPacketConn(pConn).SetControlMessage(ipv4.FlagDst|ipv4.FlagInterface, true)
+		} else {
+			err = ipv6.NewPacketConn(pConn).SetControlMessage(ipv6.FlagDst|ipv6.FlagInterface, true)
+			// Dual-stack sockets may report IPv4 packet information instead of IPv6.
+			_ = ipv4.NewPacketConn(pConn).SetControlMessage(ipv4.FlagDst|ipv4.FlagInterface, true)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("enable UDP destination address: %w", err)
+		}
+		l.packetInfo = true
+	}
 	go l.readLoop()
 
 	return l, nil
@@ -71,6 +89,7 @@ func Listen(listenConfig net.ListenConfig, network, address string, timeout time
 
 	l, err := ListenPacketConn(packetConn, timeout)
 	if err != nil {
+		_ = packetConn.Close()
 		return nil, fmt.Errorf("listen packet conn: %w", err)
 	}
 
@@ -152,11 +171,11 @@ func (l *Listener) readLoop() {
 		// before c.msgs is emptied via Read()
 		buf := make([]byte, maxDatagramSize)
 
-		n, raddr, err := l.pConn.ReadFrom(buf)
+		n, raddr, local, reply, err := l.readPacket(buf)
 		if err != nil {
 			return
 		}
-		conn, err := l.getConn(raddr)
+		conn, err := l.getConn(raddr, local, reply)
 		if err != nil {
 			continue
 		}
@@ -169,13 +188,55 @@ func (l *Listener) readLoop() {
 	}
 }
 
+// readPacket retains the destination so wildcard listeners reply from the same IP.
+func (l *Listener) readPacket(buf []byte) (int, net.Addr, net.Addr, []byte, error) {
+	if !l.packetInfo {
+		n, remote, err := l.pConn.ReadFrom(buf)
+		return n, remote, l.Addr(), nil, err
+	}
+	oob := make([]byte, len(ipv4.NewControlMessage(ipv4.FlagDst|ipv4.FlagInterface))+len(ipv6.NewControlMessage(ipv6.FlagDst|ipv6.FlagInterface)))
+	n, oobn, _, remote, err := l.pConn.ReadMsgUDP(buf, oob)
+	if err != nil {
+		return 0, nil, nil, nil, err
+	}
+	local := *l.pConn.LocalAddr().(*net.UDPAddr)
+	var v6 ipv6.ControlMessage
+	if err = v6.Parse(oob[:oobn]); err != nil {
+		return 0, nil, nil, nil, err
+	}
+	if v6.Dst != nil {
+		local.IP = v6.Dst
+		if ip := v6.Dst.To4(); ip != nil {
+			local.IP = ip
+			return n, remote, &local, (&ipv4.ControlMessage{Src: ip}).Marshal(), nil
+		}
+		if v6.Dst.IsLinkLocalUnicast() {
+			local.Zone = fmt.Sprint(v6.IfIndex)
+		}
+		reply := (&ipv6.ControlMessage{Src: v6.Dst, IfIndex: v6.IfIndex}).Marshal()
+		return n, remote, &local, reply, nil
+	}
+	var v4 ipv4.ControlMessage
+	if err = v4.Parse(oob[:oobn]); err != nil {
+		return 0, nil, nil, nil, err
+	}
+	if v4.Dst != nil {
+		local.IP = v4.Dst
+		// On Darwin, a nonzero IfIndex overrides Src instead of constraining it.
+		reply := (&ipv4.ControlMessage{Src: v4.Dst}).Marshal()
+		return n, remote, &local, reply, nil
+	}
+	return 0, nil, nil, nil, errors.New("UDP destination address missing")
+}
+
 // getConn returns the ongoing session with raddr if it exists, or creates a new
 // one otherwise.
-func (l *Listener) getConn(raddr net.Addr) (*Conn, error) {
+func (l *Listener) getConn(raddr, local net.Addr, reply []byte) (*Conn, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	conn, ok := l.conns[raddr.String()]
+	key := raddr.String() + "|" + local.String()
+	conn, ok := l.conns[key]
 	if ok {
 		return conn, nil
 	}
@@ -184,7 +245,8 @@ func (l *Listener) getConn(raddr net.Addr) (*Conn, error) {
 		return nil, errClosedListener
 	}
 	conn = l.newConn(raddr)
-	l.conns[raddr.String()] = conn
+	conn.key, conn.reply = key, reply
+	l.conns[key] = conn
 	l.acceptCh <- conn
 	go conn.readLoop()
 
@@ -207,6 +269,8 @@ func (l *Listener) newConn(rAddr net.Addr) *Conn {
 type Conn struct {
 	listener *Listener
 	rAddr    net.Addr
+	key      string
+	reply    []byte
 
 	receiveCh chan []byte // to receive the data from the listener's readLoop
 	readCh    chan []byte // to receive the buffer into which we should Read
@@ -219,6 +283,16 @@ type Conn struct {
 	timeout  time.Duration // for timeouts
 	doneOnce sync.Once
 	doneCh   chan struct{}
+}
+
+var _ Connection = (*Conn)(nil)
+
+func (c *Conn) LocalAddr() net.Addr {
+	return c.listener.Addr()
+}
+
+func (c *Conn) RemoteAddr() net.Addr {
+	return c.rAddr
 }
 
 // Read reads up to len(p) bytes into p from the connection.
@@ -246,6 +320,10 @@ func (c *Conn) Write(p []byte) (n int, err error) {
 	c.lastActivity = time.Now()
 	c.muActivity.Unlock()
 
+	if len(c.reply) != 0 {
+		n, _, err = c.listener.pConn.WriteMsgUDP(p, c.reply, c.rAddr.(*net.UDPAddr))
+		return n, err
+	}
 	return c.listener.pConn.WriteTo(p, c.rAddr)
 }
 
@@ -255,7 +333,9 @@ func (c *Conn) Close() error {
 
 	c.listener.mu.Lock()
 	defer c.listener.mu.Unlock()
-	delete(c.listener.conns, c.rAddr.String())
+	if c.listener.conns[c.key] == c {
+		delete(c.listener.conns, c.key)
+	}
 	return nil
 }
 
