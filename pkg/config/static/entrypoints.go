@@ -118,7 +118,22 @@ func (c *HTTP2Config) SetDefaults() {
 
 // HTTP3Config is the HTTP3 configuration of an entry point.
 type HTTP3Config struct {
-	AdvertisedPort int `description:"UDP port to advertise, on which HTTP/3 is available." json:"advertisedPort,omitempty" toml:"advertisedPort,omitempty" yaml:"advertisedPort,omitempty" export:"true"`
+	AdvertisedPort                   int             `description:"UDP port to advertise, on which HTTP/3 is available." json:"advertisedPort,omitempty" toml:"advertisedPort,omitempty" yaml:"advertisedPort,omitempty" export:"true"`
+	Versions                         []uint32        `description:"QUIC versions that can be negotiated, expressed as wire version numbers." json:"versions,omitempty" toml:"versions,omitempty" yaml:"versions,omitempty" export:"true"`
+	HandshakeIdleTimeout             ptypes.Duration `description:"Maximum idle time before the QUIC handshake completes." json:"handshakeIdleTimeout,omitempty" toml:"handshakeIdleTimeout,omitempty" yaml:"handshakeIdleTimeout,omitempty" export:"true"`
+	MaxIdleTimeout                   ptypes.Duration `description:"Maximum idle time for an established QUIC connection." json:"maxIdleTimeout,omitempty" toml:"maxIdleTimeout,omitempty" yaml:"maxIdleTimeout,omitempty" export:"true"`
+	InitialStreamReceiveWindow       uint64          `description:"Initial stream-level QUIC receive flow-control window." json:"initialStreamReceiveWindow,omitempty" toml:"initialStreamReceiveWindow,omitempty" yaml:"initialStreamReceiveWindow,omitempty" export:"true"`
+	MaxStreamReceiveWindow           uint64          `description:"Maximum stream-level QUIC receive flow-control window." json:"maxStreamReceiveWindow,omitempty" toml:"maxStreamReceiveWindow,omitempty" yaml:"maxStreamReceiveWindow,omitempty" export:"true"`
+	InitialConnectionReceiveWindow   uint64          `description:"Initial connection-level QUIC receive flow-control window." json:"initialConnectionReceiveWindow,omitempty" toml:"initialConnectionReceiveWindow,omitempty" yaml:"initialConnectionReceiveWindow,omitempty" export:"true"`
+	MaxConnectionReceiveWindow       uint64          `description:"Maximum connection-level QUIC receive flow-control window." json:"maxConnectionReceiveWindow,omitempty" toml:"maxConnectionReceiveWindow,omitempty" yaml:"maxConnectionReceiveWindow,omitempty" export:"true"`
+	MaxIncomingStreams               int64           `description:"Maximum number of concurrent incoming bidirectional QUIC streams." json:"maxIncomingStreams,omitempty" toml:"maxIncomingStreams,omitempty" yaml:"maxIncomingStreams,omitempty" export:"true"`
+	MaxIncomingUniStreams            int64           `description:"Maximum number of concurrent incoming unidirectional QUIC streams." json:"maxIncomingUniStreams,omitempty" toml:"maxIncomingUniStreams,omitempty" yaml:"maxIncomingUniStreams,omitempty" export:"true"`
+	KeepAlivePeriod                  ptypes.Duration `description:"Period between QUIC keep-alive packets; zero disables keep-alive." json:"keepAlivePeriod,omitempty" toml:"keepAlivePeriod,omitempty" yaml:"keepAlivePeriod,omitempty" export:"true"`
+	InitialPacketSize                uint16          `description:"Initial and minimum QUIC packet size." json:"initialPacketSize,omitempty" toml:"initialPacketSize,omitempty" yaml:"initialPacketSize,omitempty" export:"true"`
+	DisablePathMTUDiscovery          bool            `description:"Disables QUIC path MTU discovery." json:"disablePathMTUDiscovery,omitempty" toml:"disablePathMTUDiscovery,omitempty" yaml:"disablePathMTUDiscovery,omitempty" export:"true"`
+	Allow0RTT                        bool            `description:"Allows QUIC 0-RTT connection attempts." json:"allow0RTT,omitempty" toml:"allow0RTT,omitempty" yaml:"allow0RTT,omitempty" export:"true"`
+	EnableDatagrams                  bool            `description:"Enables HTTP and QUIC Datagrams for HTTP/3 requests." json:"enableDatagrams,omitempty" toml:"enableDatagrams,omitempty" yaml:"enableDatagrams,omitempty" export:"true"`
+	EnableStreamResetPartialDelivery bool            `description:"Enables QUIC stream resets with partial delivery." json:"enableStreamResetPartialDelivery,omitempty" toml:"enableStreamResetPartialDelivery,omitempty" yaml:"enableStreamResetPartialDelivery,omitempty" export:"true"`
 }
 
 // Redirections is a set of redirection for an entry point.
@@ -171,6 +186,7 @@ type EntryPointsTransport struct {
 	RespondingTimeouts   *RespondingTimeouts `description:"Timeouts for incoming requests to the Traefik instance." json:"respondingTimeouts,omitempty" toml:"respondingTimeouts,omitempty" yaml:"respondingTimeouts,omitempty" export:"true"`
 	KeepAliveMaxTime     ptypes.Duration     `description:"Maximum duration before closing a keep-alive connection." json:"keepAliveMaxTime,omitempty" toml:"keepAliveMaxTime,omitempty" yaml:"keepAliveMaxTime,omitempty" export:"true"`
 	KeepAliveMaxRequests int                 `description:"Maximum number of requests before closing a keep-alive connection." json:"keepAliveMaxRequests,omitempty" toml:"keepAliveMaxRequests,omitempty" yaml:"keepAliveMaxRequests,omitempty" export:"true"`
+	EnableFullDuplex     bool                `description:"Enables full duplex communication for protocols that support it, such as HTTP/2 and HTTP/3." json:"enableFullDuplex,omitempty" toml:"enableFullDuplex,omitempty" yaml:"enableFullDuplex,omitempty" export:"false"`
 }
 
 // SetDefaults sets the default values.

@@ -61,6 +61,8 @@ type Middleware struct {
 	Snippet                          *Snippet                          `json:"snippet,omitempty" toml:"-" yaml:"-" label:"-" file:"-" kv:"-" export:"true"`
 	RewriteTarget                    *RewriteTarget                    `json:"rewriteTarget,omitempty" toml:"-" yaml:"-" label:"-" file:"-" kv:"-" export:"true"`
 	UpstreamVHost                    *UpstreamVHost                    `json:"upstreamVHost,omitempty" toml:"-" yaml:"-" label:"-" file:"-" kv:"-" export:"true"`
+	// Anyone extension
+	Anyone map[string]any `json:"-" toml:"-" yaml:"-" export:"true"`
 }
 
 // +k8s:deepcopy-gen=true

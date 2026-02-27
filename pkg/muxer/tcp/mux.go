@@ -5,6 +5,7 @@ import (
 	"net"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/rs/zerolog/log"
@@ -19,6 +20,18 @@ type ConnData struct {
 	serverName string
 	remoteIP   string
 	alpnProtos []string
+	host       string
+	port       int
+}
+
+func FakeConnData(serverName string, remoteIP string, alpnProtos []string, host string, port int) ConnData {
+	return ConnData{
+		serverName: serverName,
+		remoteIP:   remoteIP,
+		alpnProtos: alpnProtos,
+		host:       host,
+		port:       port,
+	}
 }
 
 // NewConnData builds a connData struct from the given parameters.
@@ -28,6 +41,19 @@ func NewConnData(serverName string, conn tcp.WriteCloser, alpnProtos []string) (
 		return ConnData{}, fmt.Errorf("error while parsing remote address %q: %w", conn.RemoteAddr().String(), err)
 	}
 
+	// as per https://datatracker.ietf.org/doc/html/rfc6066:
+	// > The hostname is represented as a byte string using ASCII encoding without a trailing dot.
+	// so there is no need to trim a potential trailing dot
+	serverName = types.CanonicalDomain(serverName)
+
+	h, port, err := net.SplitHostPort(conn.LocalAddr().String())
+	if nil != err {
+		return ConnData{}, fmt.Errorf("error while parsing local address %q: %w", conn.LocalAddr().String(), err)
+	}
+	p, err := strconv.Atoi(port)
+	if nil != err {
+		return ConnData{}, fmt.Errorf("error while parsing local port %q: %w", conn.LocalAddr().String(), err)
+	}
 	return ConnData{
 		// As per https://datatracker.ietf.org/doc/html/rfc6066:
 		// > The hostname is represented as a byte string using ASCII encoding without a trailing dot.
@@ -35,6 +61,8 @@ func NewConnData(serverName string, conn tcp.WriteCloser, alpnProtos []string) (
 		serverName: types.CanonicalDomain(serverName),
 		remoteIP:   remoteIP,
 		alpnProtos: alpnProtos,
+		host:       h,
+		port:       p,
 	}, nil
 }
 
@@ -182,6 +210,43 @@ func (m *Muxer) AddRoute(rule string, syntax string, priority int, providerName 
 // HasRoutes returns whether the muxer has routes.
 func (m *Muxer) HasRoutes() bool {
 	return len(m.routes) > 0
+}
+
+func (m *Muxer) Parse(rule string) (*Matcher, error) {
+	var parse interface{}
+	var err error
+	parse, err = m.parser.Parse(rule)
+	if err != nil {
+		return nil, fmt.Errorf("error while parsing rule %s: %w", rule, err)
+	}
+	buildTree, ok := parse.(rules.TreeBuilder)
+	if !ok {
+		return nil, fmt.Errorf("error while parsing rule %s", rule)
+	}
+	ruleTree := buildTree()
+	var matchers matchersTree
+	err = matchers.addRule(ruleTree, tcpFuncs)
+	if err != nil {
+		return nil, fmt.Errorf("error while adding rule %s: %w", rule, err)
+	}
+	var catchAll bool
+	if ruleTree.RuleLeft == nil && ruleTree.RuleRight == nil && len(ruleTree.Value) == 1 {
+		catchAll = ruleTree.Value[0] == "*" && strings.EqualFold(ruleTree.Matcher, "HostSNI")
+	}
+	return &Matcher{m: matchers, catchAll: catchAll}, nil
+}
+
+type Matcher struct {
+	m        matchersTree
+	catchAll bool
+}
+
+func (that *Matcher) Match(meta ConnData) bool {
+	return that.m.match(meta)
+}
+
+func (that *Matcher) CatchAll() bool {
+	return that.catchAll
 }
 
 // ParseHostSNI extracts the HostSNIs declared in a rule.

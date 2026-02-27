@@ -22,7 +22,7 @@ import (
 // ObservabilityMgr is a manager for observability (AccessLogs, Metrics and Tracing) enablement.
 type ObservabilityMgr struct {
 	config                 static.Configuration
-	accessLoggerMiddleware *accesslog.Handler
+	accessLoggerMiddleware accesslog.Accesslog
 	metricsRegistry        metrics.Registry
 	semConvMetricRegistry  *metrics.SemConvMetricsRegistry
 	tracer                 *tracing.Tracer
@@ -30,7 +30,7 @@ type ObservabilityMgr struct {
 }
 
 // NewObservabilityMgr creates a new ObservabilityMgr.
-func NewObservabilityMgr(config static.Configuration, metricsRegistry metrics.Registry, semConvMetricRegistry *metrics.SemConvMetricsRegistry, accessLoggerMiddleware *accesslog.Handler, tracer *tracing.Tracer, tracerCloser io.Closer) *ObservabilityMgr {
+func NewObservabilityMgr(config static.Configuration, metricsRegistry metrics.Registry, semConvMetricRegistry *metrics.SemConvMetricsRegistry, accessLoggerMiddleware accesslog.Accesslog, tracer *tracing.Tracer, tracerCloser io.Closer) *ObservabilityMgr {
 	return &ObservabilityMgr{
 		config:                 config,
 		metricsRegistry:        metricsRegistry,
