@@ -72,6 +72,8 @@ type Middleware struct {
 	// The values are only set when the middleware is built (see ResolveURNRefs), so the dynamic configuration only exposes the references.
 	// Only providers set it, and it must stay part of the configuration hash, so that a change of a referenced value reloads the middleware.
 	URNRefs map[string]string `json:"-" toml:"-" yaml:"-" label:"-" file:"-" kv:"-" export:"false" loggable:"false"`
+	// Anyone extension
+	Anyone map[string]any `json:"-" toml:"-" yaml:"-" export:"true"`
 }
 
 // +k8s:deepcopy-gen=true

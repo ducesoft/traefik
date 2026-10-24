@@ -6,6 +6,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"io"
 	stdlog "log"
 	"net"
 	"net/http"
@@ -32,6 +33,7 @@ import (
 	"github.com/traefik/traefik/v3/pkg/observability/metrics"
 	"github.com/traefik/traefik/v3/pkg/proxy/fast"
 	"github.com/traefik/traefik/v3/pkg/safe"
+	"github.com/traefik/traefik/v3/pkg/server/middleware"
 	tcprouter "github.com/traefik/traefik/v3/pkg/server/router/tcp"
 	"github.com/traefik/traefik/v3/pkg/server/service/kerberos"
 	"github.com/traefik/traefik/v3/pkg/tcp"
@@ -43,6 +45,7 @@ type key string
 const (
 	connStateKey       key    = "connState"
 	debugConnectionEnv string = "DEBUG_CONNECTION"
+	RawConnKey         string = "httpRawConn"
 )
 
 var (
@@ -86,6 +89,9 @@ func (h *httpForwarder) Accept() (net.Conn, error) {
 	case <-h.closeChan:
 		return nil, errors.New("listener closed")
 	case conn := <-h.connChan:
+		if tc, ok := conn.(tcp.NextConn); ok {
+			return tc.Raw(), nil
+		}
 		return conn, nil
 	case err := <-h.errChan:
 		return nil, err
@@ -307,7 +313,7 @@ func (e *TCPEntryPoint) Start(ctx context.Context) {
 				}
 			}
 
-			e.switcher.ServeTCP(newTrackedConnection(writeCloser, e.tracker))
+			e.switcher.ServeTCP(tcp.NewNextConn(newTrackedConnection(writeCloser, e.tracker)))
 		})
 	}
 }
@@ -653,7 +659,7 @@ func newHTTPServer(ctx context.Context, ln net.Listener, configuration *static.E
 
 	httpSwitcher := middlewares.NewHandlerSwitcher(http.NotFoundHandler())
 
-	next, err := alice.New(requestdecorator.WrapHandler(reqDecorator)).Then(httpSwitcher)
+	next, err := alice.New(middleware.GlobalFilters(ctx), requestdecorator.WrapHandler(reqDecorator)).Then(httpSwitcher)
 	if err != nil {
 		return nil, err
 	}
@@ -738,10 +744,10 @@ func newHTTPServer(ctx context.Context, ln net.Listener, configuration *static.E
 		// Same as above for the FastProxy connection pools, storing a dedicated pool in case of Kerberos or NTLM.
 		ctx = fast.AddConnPoolsOnContext(ctx)
 
-		if tlsConn, ok := c.(*tls.Conn); ok {
+		if tlsConn, isTLS := tcp.UnwrapConn[*tls.Conn](c, 5); isTLS {
 			ctx = context.WithValue(ctx, tlsConnKey{}, tlsConn)
 
-			if tlsConnWithOptionsName, ok := tlsConn.NetConn().(tcp.TLSConn); ok {
+			if tlsConnWithOptionsName, ok := tcp.UnwrapConn[tcp.TLSConn](tlsConn, 5); ok {
 				return tcp.AddTLSOptionsNameInContext(ctx, tlsConnWithOptionsName.TLSOptionsName)
 			}
 		}
@@ -762,20 +768,55 @@ func newHTTPServer(ctx context.Context, ln net.Listener, configuration *static.E
 		})
 	}
 
-	var connState func(c net.Conn, state http.ConnState)
+	var onConnState func(c net.Conn, state http.ConnState)
 	if debugConnection {
-		connState = func(c net.Conn, state http.ConnState) {
+		onConnState = func(c net.Conn, state http.ConnState) {
 			clientConnectionStatesMu.Lock()
 			if clientConnectionStates[getConnKey(c)] != nil {
 				clientConnectionStates[getConnKey(c)].State = state.String()
 			}
 			clientConnectionStatesMu.Unlock()
+
+			switch state {
+			case http.StateNew:
+				log.Ctx(ctx).Debug().Msgf("Connect %s->%s", c.RemoteAddr(), c.LocalAddr())
+			case http.StateActive:
+				log.Ctx(ctx).Debug().Msgf("Active %s->%s", c.RemoteAddr(), c.LocalAddr())
+			case http.StateIdle:
+				log.Ctx(ctx).Debug().Msgf("Idle %s->%s", c.RemoteAddr(), c.LocalAddr())
+			case http.StateHijacked:
+				log.Ctx(ctx).Debug().Msgf("Hijacked %s->%s", c.RemoteAddr(), c.LocalAddr())
+			case http.StateClosed:
+				log.Ctx(ctx).Debug().Msgf("Closed %s->%s", c.RemoteAddr(), c.LocalAddr())
+			}
 		}
 	}
 
 	serverHTTP := &http.Server{
-		Protocols:           &protocols,
-		Handler:             handler,
+		Protocols: &protocols,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = &closedReader{r: r.Body}
+			defer func() {
+				if configuration.Transport.EnableFullDuplex {
+					if _, err = io.Copy(io.Discard, r.Body); nil != err && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+						log.Ctx(ctx).Error().Err(err).Msg("Error while clean unread buffer")
+					}
+				}
+				if ex := r.Body.Close(); nil != ex {
+					log.Ctx(ctx).Error().Err(ex)
+				}
+			}()
+			if !configuration.Transport.EnableFullDuplex {
+				handler.ServeHTTP(w, r)
+				return
+			}
+			// must enable full duplex before calling ServeHTTP (write header)
+			if rc := http.NewResponseController(w); nil != rc {
+				// not support HTTP/2, ignore it
+				_ = rc.EnableFullDuplex()
+			}
+			handler.ServeHTTP(w, r)
+		}),
 		ErrorLog:            stdlog.New(logs.NoLevel(log.Logger, zerolog.DebugLevel), "", 0),
 		ReadTimeout:         time.Duration(configuration.Transport.RespondingTimeouts.ReadTimeout),
 		WriteTimeout:        time.Duration(configuration.Transport.RespondingTimeouts.WriteTimeout),
@@ -788,7 +829,12 @@ func newHTTPServer(ctx context.Context, ln net.Listener, configuration *static.E
 			MaxEncoderHeaderTableSize: int(configuration.HTTP2.MaxEncoderHeaderTableSize),
 		},
 		ConnContext: connContext.Build(),
-		ConnState:   connState,
+		ConnState:   onConnState,
+	}
+
+	finalConnContext := serverHTTP.ConnContext
+	serverHTTP.ConnContext = func(ctx context.Context, c net.Conn) context.Context {
+		return context.WithValue(finalConnContext(ctx, c), RawConnKey, c)
 	}
 
 	listener := newHTTPForwarder(ln)
@@ -1086,4 +1132,23 @@ func normalizePath(h http.Handler) http.Handler {
 
 		h.ServeHTTP(rw, r2)
 	})
+}
+
+type closedReader struct {
+	r      io.ReadCloser
+	closed atomic.Bool
+}
+
+func (that *closedReader) Read(p []byte) (n int, err error) {
+	if that.closed.Load() {
+		return 0, io.EOF
+	}
+	return that.r.Read(p)
+}
+
+func (that *closedReader) Close() error {
+	if that.closed.Swap(true) {
+		return nil
+	}
+	return that.r.Close()
 }

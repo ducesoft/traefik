@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/traefik/traefik/v3/pkg/config/runtime"
 	"github.com/traefik/traefik/v3/pkg/observability/logs"
+	udpmiddleware "github.com/traefik/traefik/v3/pkg/server/middleware/udp"
 	"github.com/traefik/traefik/v3/pkg/server/provider"
 	udpservice "github.com/traefik/traefik/v3/pkg/server/service/udp"
 	"github.com/traefik/traefik/v3/pkg/udp"
@@ -87,6 +88,14 @@ func (m *Manager) buildEntryPointHandlers(ctx context.Context, configs map[strin
 		}
 
 		handler, err := m.serviceManager.BuildUDP(ctxRouter, routerConfig.Service)
+		if err != nil {
+			routerConfig.AddError(err, true)
+			logger.Error().Err(err).Send()
+			continue
+		}
+
+		chain := udpmiddleware.NewBuilder(m.conf.UDPMiddlewares).BuildChain(ctxRouter, routerConfig.Middlewares)
+		handler, err = udp.NewChain(udp.GlobalFilters(ctxRouter)).Extend(chain).Then(handler)
 		if err != nil {
 			routerConfig.AddError(err, true)
 			logger.Error().Err(err).Send()

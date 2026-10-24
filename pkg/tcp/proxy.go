@@ -1,6 +1,7 @@
 package tcp
 
 import (
+	"crypto/tls"
 	"errors"
 	"io"
 	"net"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	traefiktls "github.com/traefik/traefik/v3/pkg/tls"
 )
 
 // Proxy forwards a TCP request to a TCP service.
@@ -40,6 +42,11 @@ func (p *Proxy) ServeTCP(conn WriteCloser) {
 		return
 	}
 
+	ContextVars(conn, map[string]string{
+		ProxyClientAddr: connBackend.LocalAddr().String(),
+		ProxyServerAddr: connBackend.RemoteAddr().String(),
+	})
+
 	// maybe not needed, but just in case
 	defer connBackend.Close()
 	errChan := make(chan error)
@@ -60,6 +67,22 @@ func (p *Proxy) ServeTCP(conn WriteCloser) {
 	}
 
 	<-errChan
+
+	if tc, ok := connBackend.(*tls.Conn); ok {
+		state := tc.ConnectionState()
+		dict := map[string]string{
+			ProxyTLSVersion: traefiktls.GetVersion(&state),
+			ProxyTLSCipher:  traefiktls.GetCipherName(&state),
+			ProxyTLSSNI:     state.ServerName,
+			ProxyProtocol:   "TLS",
+		}
+		if nil != err {
+			dict[Status] = err.Error()
+		} else {
+			dict[Status] = "Y"
+		}
+		ContextVars(conn, dict)
+	}
 }
 
 func (p *Proxy) dialBackend(clientConn net.Conn) (WriteCloser, error) {

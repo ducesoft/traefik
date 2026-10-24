@@ -172,6 +172,9 @@ type RouterTLSConfig struct {
 	ConflictingOptions bool           `json:"-" toml:"-" yaml:"-" label:"-" file:"-" kv:"-" export:"false"`
 	CertResolver       string         `json:"certResolver,omitempty" toml:"certResolver,omitempty" yaml:"certResolver,omitempty" export:"true"`
 	Domains            []types.Domain `json:"domains,omitempty" toml:"domains,omitempty" yaml:"domains,omitempty" export:"true"`
+	//
+	SNICheck bool           `json:"-" toml:"-" yaml:"-" label:"-" file:"-" kv:"-" export:"false"`
+	Plugin   map[string]any `json:"-" toml:"-" yaml:"-" export:"true"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -600,6 +603,12 @@ type ServersTransport struct {
 	PeerCertURI  string           `description:"Defines the URI used to match against SAN URI during the peer certificate verification." json:"peerCertURI,omitempty" toml:"peerCertURI,omitempty" yaml:"peerCertURI,omitempty"`
 	PeerCertSANs []traefiktls.SAN `description:"Defines the SANs (Subject Alternative Names) used to match against SANs during the peer certificate verification." json:"peerCertSANs,omitempty" toml:"peerCertSANs,omitempty" yaml:"peerCertSANs,omitempty"`
 	Spiffe       *Spiffe          `description:"Defines the SPIFFE configuration." json:"spiffe,omitempty" toml:"spiffe,omitempty" yaml:"spiffe,omitempty" label:"allowEmpty" file:"allowEmpty" export:"true"`
+	//
+	Proxy           string          `description:"Network proxy provider." json:"proxy,omitempty" toml:"proxy,omitempty" yaml:"proxy,omitempty" export:"true"`
+	Plugin          map[string]any  `description:"Plugin configuration." json:"-" toml:"-" yaml:"-" export:"true"`
+	MaxIdleConns    int             `description:"MaxIdleConns controls the maximum number of idle (keep-alive) connections across all hosts. Zero means no limit." json:"maxIdleConns,omitempty" toml:"maxIdleConns,omitempty" yaml:"maxIdleConns,omitempty" export:"true"`
+	MaxConnsPerHost int             `description:"MaxConnsPerHost optionally limits the total number of connections per host, including connections in the dialing, active, and idle states. On limit violation, dials will block. Zero means no limit." json:"maxConnsPerHost,omitempty" toml:"maxConnsPerHost,omitempty" yaml:"maxConnsPerHost,omitempty" export:"true"`
+	IdleConnTimeout ptypes.Duration `description:"The maximum amount of time an idle (keep-alive) connection will remain idle before closing itself. Zero means no limit." json:"idleConnTimeout,omitempty" toml:"idleConnTimeout,omitempty" yaml:"idleConnTimeout,omitempty" export:"true"`
 }
 
 // +k8s:deepcopy-gen=true

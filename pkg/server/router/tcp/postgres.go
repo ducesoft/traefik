@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -64,7 +65,7 @@ func (r *Router) servePostgres(conn *peekConn) error {
 		log.Error().Err(err).Msg("Error while setting deadline")
 	}
 
-	connData, err := tcpmuxer.NewConnData(hello.serverName, conn.RemoteAddr(), hello.protos)
+	connData, err := tcpmuxer.NewConnData(hello.serverName, conn, hello.protos)
 	if err != nil {
 		log.Error().Err(err).Msg("Error while reading TCP connection data")
 		return nil
@@ -156,4 +157,12 @@ func (c *postgresConn) Write(p []byte) (n int, err error) {
 	close(c.errChan)
 
 	return 1, nil
+}
+
+func (c *postgresConn) Raw() net.Conn {
+	return c
+}
+
+func (c *postgresConn) Unwrap() net.Conn {
+	return c.WriteCloser
 }

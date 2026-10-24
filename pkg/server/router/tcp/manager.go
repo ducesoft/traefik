@@ -135,13 +135,22 @@ func (m *Manager) buildEntryPointHandler(ctx context.Context, configs map[string
 			continue
 		}
 
+		tlsConf, tlsConfErr := m.tlsManager.Get(traefiktls.DefaultTLSStoreName, tlsOptionsName)
+		if tlsConfErr != nil {
+			// Note: we do not call AddError here because we already did so when buildRouterHandler errored for the same reason.
+			logger.Error().Err(tlsConfErr).Send()
+		}
+		if nil != tlsConf {
+			defaultTLSConf = tlsConf
+		}
+
 		if len(domains) == 0 {
 			// Extra Host(*) rule, for HTTPS routers with no Host rule,
 			// and for requests for which the SNI does not match _any_ of the other existing routers Host.
 			// This is only about choosing the TLS configuration.
 			// The actual routing will be done further on by the HTTPS handler.
 			// See examples below.
-			router.AddHTTPTLSConfig("*", defaultTLSConf, traefiktls.DefaultTLSConfigName)
+			router.AddHTTPTLSConfig("*", defaultTLSConf, traefiktls.DefaultTLSConfigName, routerHTTPConfig.TLS.Plugin)
 
 			// The server name (from a Host(SNI) rule) is the only parameter (available in HTTP routing rules) on which we can map a TLS config,
 			// because it is the only one accessible before decryption (we obtain it during the ClientHello).
@@ -167,8 +176,11 @@ func (m *Manager) buildEntryPointHandler(ctx context.Context, configs map[string
 			//	# if its SNI is set to foo.com, myTLSOptions will be used for the TLS connection.
 			//	# Otherwise, it will fallback to the default TLS config.
 			if tlsOptionsName != traefiktls.DefaultTLSConfigName {
-				logger.Warn().Msgf("No domain found in rule %v, the TLS option %s cannot be applied", routerHTTPConfig.Rule, tlsOptionsName)
+				logger.Debug().Msgf("No domain found in rule %v, the TLS option %s cannot be applied", routerHTTPConfig.Rule, tlsOptionsName)
 				routerHTTPConfig.AddError(fmt.Errorf("no domain found in rule %v, the TLS option %s cannot be applied", routerHTTPConfig.Rule, tlsOptionsName), false)
+			}
+			if nil != routerHTTPConfig.TLS && "" == routerHTTPConfig.TLS.Options {
+				logger.Debug().Msgf("No domain found in rule %v, the TLS options applied for this router will depend on the SNI of each request", routerHTTPConfig.Rule)
 			}
 		}
 
@@ -184,7 +196,7 @@ func (m *Manager) buildEntryPointHandler(ctx context.Context, configs map[string
 		// Even though the error is seemingly ignored (aside from logging it),
 		// we actually rely later on the fact that a tls config is nil (which happens when an error is returned) to take special steps
 		// when assigning a handler to a route.
-		tlsConf, tlsConfErr := m.tlsManager.Get(traefiktls.DefaultTLSStoreName, routerHTTPConfig.TLS.ResolvedOptions)
+		tlsConf, tlsConfErr = m.tlsManager.Get(traefiktls.DefaultTLSStoreName, routerHTTPConfig.TLS.ResolvedOptions)
 		if tlsConfErr != nil {
 			// Note: we do not call AddError here because we already did so when buildRouterHandler errored for the same reason.
 			logger.Error().Err(tlsConfErr).Send()
@@ -195,12 +207,12 @@ func (m *Manager) buildEntryPointHandler(ctx context.Context, configs map[string
 				// we use nil config as a signal to insert a handler
 				// that enforces that TLS connection attempts to the corresponding (broken) router should fail.
 				logger.Debug().Msgf("Adding special closing route for %s because of a broken TLS options %s", domain, routerHTTPConfig.TLS.ResolvedOptions)
-				router.AddHTTPTLSConfig(domain, nil, "")
+				router.AddHTTPTLSConfig(domain, nil, "", routerHTTPConfig.TLS.Plugin)
 				continue
 			}
 
 			logger.Debug().Msgf("Adding route for %s with TLS options %s", domain, routerHTTPConfig.TLS.ResolvedOptions)
-			router.AddHTTPTLSConfig(domain, tlsConf, routerHTTPConfig.TLS.ResolvedOptions)
+			router.AddHTTPTLSConfig(domain, tlsConf, routerHTTPConfig.TLS.ResolvedOptions, routerHTTPConfig.TLS.Plugin)
 		}
 	}
 
@@ -268,6 +280,7 @@ func (m *Manager) addTCPHandlers(ctx context.Context, configs map[string]*runtim
 				logger.Error().Err(err).Send()
 				continue
 			}
+			handler = tcp.NewFieldHandler(handler, map[string]string{tcp.RouterName: routerName})
 		}
 
 		if routerConfig.TLS == nil {
@@ -344,11 +357,7 @@ func (m *Manager) addTCPHandlers(ctx context.Context, configs map[string]*runtim
 			continue
 		}
 
-		handler = &tcp.TLSHandler{
-			Next:           handler,
-			Config:         tlsConf,
-			TLSOptionsName: tlsOptionsName,
-		}
+		handler = tcp.TLSServer(handler, tlsConf, tlsOptionsName, routerConfig.TLS.Plugin, nil)
 
 		logger.Debug().Msgf("Adding TLS route for %q", routerConfig.Rule)
 

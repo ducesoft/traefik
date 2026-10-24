@@ -22,7 +22,7 @@ import (
 )
 
 type http3server struct {
-	*http3.Server
+	Server HTTP3Server
 
 	http3conn net.PacketConn
 
@@ -70,16 +70,15 @@ func newHTTP3Server(ctx context.Context, name string, config *static.EntryPoint,
 		handler = withReadTimeout(ctx, handler, readTimeout)
 	}
 
-	h3.Server = &http3.Server{
-		Addr:           config.GetAddress(),
-		Port:           config.HTTP3.AdvertisedPort,
-		Handler:        handler,
-		TLSConfig:      &tls.Config{GetConfigForClient: h3.getTLSConfigForClient},
-		MaxHeaderBytes: config.HTTP.MaxHeaderBytes,
-		IdleTimeout:    time.Duration(config.Transport.RespondingTimeouts.IdleTimeout),
-		QUICConfig: &quic.Config{
-			Allow0RTT: false,
-		},
+	server := &http3.Server{
+		Addr:            config.GetAddress(),
+		Port:            config.HTTP3.AdvertisedPort,
+		Handler:         handler,
+		TLSConfig:       &tls.Config{GetConfigForClient: h3.getTLSConfigForClient},
+		MaxHeaderBytes:  config.HTTP.MaxHeaderBytes,
+		IdleTimeout:     time.Duration(config.Transport.RespondingTimeouts.IdleTimeout),
+		EnableDatagrams: config.HTTP3.EnableDatagrams,
+		QUICConfig:      buildQUICConfig(config.HTTP3),
 		ConnContext: func(ctx context.Context, c *quic.Conn) context.Context {
 			// This adds an empty struct in order to store a RoundTripper in the ConnContext in case of Kerberos or NTLM.
 			ctx = kerberos.AddTransportOnContext(ctx)
@@ -95,11 +94,12 @@ func newHTTP3Server(ctx context.Context, name string, config *static.EntryPoint,
 			return tcp.AddTLSOptionsNameInContext(ctx, tlsOptionsName)
 		},
 	}
+	h3.Server = configureHTTP3ServerExtension(server)
 
 	previousHandler := httpsServer.Server.(*http.Server).Handler
 
 	httpsServer.Server.(*http.Server).Handler = http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		if err := h3.Server.SetQUICHeaders(rw.Header()); err != nil {
+		if err := h3.setQUICHeaders(rw.Header()); err != nil {
 			log.Ctx(ctx).Error().Err(err).Msg("Failed to set HTTP3 headers")
 		}
 
@@ -124,9 +124,38 @@ func withReadTimeout(ctx context.Context, next http.Handler, timeout time.Durati
 		next.ServeHTTP(rw, req)
 	})
 }
+func (e *http3server) setQUICHeaders(header http.Header) error {
+	_, err := e.Server.SetQUICHeaders(header, e.http3conn)
+	return err
+}
+
+func buildQUICConfig(config *static.HTTP3Config) *quic.Config {
+	versions := make([]quic.Version, len(config.Versions))
+	for index, version := range config.Versions {
+		versions[index] = quic.Version(version)
+	}
+	return &quic.Config{
+		Versions:                         versions,
+		HandshakeIdleTimeout:             time.Duration(config.HandshakeIdleTimeout),
+		MaxIdleTimeout:                   time.Duration(config.MaxIdleTimeout),
+		InitialStreamReceiveWindow:       config.InitialStreamReceiveWindow,
+		MaxStreamReceiveWindow:           config.MaxStreamReceiveWindow,
+		InitialConnectionReceiveWindow:   config.InitialConnectionReceiveWindow,
+		MaxConnectionReceiveWindow:       config.MaxConnectionReceiveWindow,
+		MaxIncomingStreams:               config.MaxIncomingStreams,
+		MaxIncomingUniStreams:            config.MaxIncomingUniStreams,
+		KeepAlivePeriod:                  time.Duration(config.KeepAlivePeriod),
+		InitialPacketSize:                config.InitialPacketSize,
+		DisablePathMTUDiscovery:          config.DisablePathMTUDiscovery,
+		Allow0RTT:                        config.Allow0RTT,
+		EnableDatagrams:                  config.EnableDatagrams,
+		EnableStreamResetPartialDelivery: config.EnableStreamResetPartialDelivery,
+	}
+}
 
 func (e *http3server) Start() error {
-	return e.Serve(e.http3conn)
+	_, err := e.Server.Serve(e.http3conn)
+	return err
 }
 
 func (e *http3server) Switch(rt *tcprouter.Router) {
@@ -141,11 +170,15 @@ func (e *http3server) Shutdown(_ context.Context) error {
 	return e.Server.Close()
 }
 
+func (e *http3server) Close() error {
+	return e.Server.Close()
+}
+
 func (e *http3server) getTLSConfigForClient(info *tls.ClientHelloInfo) (*tls.Config, error) {
 	e.lock.RLock()
 	defer e.lock.RUnlock()
 
-	connData, err := tcpmuxer.NewConnData(info.ServerName, info.Conn.RemoteAddr(), info.SupportedProtos)
+	connData, err := tcpmuxer.NewConnData(info.ServerName, info.Conn, info.SupportedProtos)
 	if err != nil {
 		return nil, fmt.Errorf("creating ConnData from client hello: %w", err)
 	}
@@ -158,7 +191,7 @@ func (e *http3server) getTLSOptionsName(c *quic.Conn) (string, error) {
 	e.lock.RLock()
 	defer e.lock.RUnlock()
 
-	connData, err := tcpmuxer.NewConnData(c.ConnectionState().TLS.ServerName, c.RemoteAddr(), []string{c.ConnectionState().TLS.NegotiatedProtocol})
+	connData, err := tcpmuxer.NewConnData(c.ConnectionState().TLS.ServerName, c, []string{c.ConnectionState().TLS.NegotiatedProtocol})
 	if err != nil {
 		return "", fmt.Errorf("creating ConnData from quic Conn: %w", err)
 	}
